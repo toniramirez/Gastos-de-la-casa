@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   balanceFromNet,
-  computeBalance,
+  computeExpenseBalance,
+  computeLoanBalance,
   computeShares,
   computeSummary,
   expenseDelta,
@@ -121,28 +122,44 @@ describe("balanceFromNet", () => {
   });
 });
 
-describe("computeBalance (escenario combinado)", () => {
-  it("gastos + préstamo + devolución", () => {
+describe("computeExpenseBalance (solo gastos, es lo que se salda al cerrar)", () => {
+  it("no mezcla préstamos: solo neto de gastos", () => {
     const expenses = [
       // Tony paga 10000 50/50 => +5000
       makeExpense({ total: 10000, paid_by: "tony", share_tony: 5000, share_sol: 5000 }),
       // Sol paga 6000 50/50 => -3000
       makeExpense({ total: 6000, paid_by: "sol", share_tony: 3000, share_sol: 3000 }),
     ];
+    // net = 5000 - 3000 = 2000 => Sol le debe a Tony 2000 (los préstamos no cuentan)
+    const b = computeExpenseBalance(expenses);
+    expect(b).toMatchObject({ net: 2000, debtor: "sol", creditor: "tony", amount: 2000 });
+  });
+});
+
+describe("computeLoanBalance (deuda de préstamos que se arrastra)", () => {
+  it("préstamo menos devolución", () => {
     const loans = [
       // Tony le presta 20000 a Sol => +20000
       makeLoan({ from_person: "tony", to_person: "sol", amount: 20000 }),
       // Sol le devuelve 10000 a Tony => -10000
       makeLoan({ type: "devolucion", from_person: "sol", to_person: "tony", amount: 10000 }),
     ];
-    // net = 5000 - 3000 + 20000 - 10000 = 12000 => Sol le debe a Tony 12000
-    const b = computeBalance(expenses, loans);
-    expect(b).toMatchObject({ net: 12000, debtor: "sol", creditor: "tony", amount: 12000 });
+    // net = 20000 - 10000 = 10000 => Sol todavía le debe 10000 a Tony
+    const b = computeLoanBalance(loans);
+    expect(b).toMatchObject({ net: 10000, debtor: "sol", creditor: "tony", amount: 10000 });
+  });
+
+  it("queda en cero cuando devolvió todo", () => {
+    const loans = [
+      makeLoan({ from_person: "tony", to_person: "sol", amount: 5000 }),
+      makeLoan({ type: "devolucion", from_person: "sol", to_person: "tony", amount: 5000 }),
+    ];
+    expect(computeLoanBalance(loans)).toMatchObject({ debtor: "even", amount: 0 });
   });
 });
 
 describe("computeSummary", () => {
-  it("agrega totales correctamente", () => {
+  it("separa balance de gastos y deuda de préstamos", () => {
     const expenses = [
       makeExpense({ total: 10000, paid_by: "tony", share_tony: 5000, share_sol: 5000 }),
       makeExpense({ total: 6000, paid_by: "sol", share_tony: 3000, share_sol: 3000 }),
@@ -154,11 +171,12 @@ describe("computeSummary", () => {
     expect(s.totalPagadoSol).toBe(6000);
     expect(s.correspondeTony).toBe(8000);
     expect(s.correspondeSol).toBe(8000);
-    expect(s.prestamosNetos).toBe(2000);
     expect(s.cantidadGastos).toBe(2);
     expect(s.cantidadPrestamos).toBe(1);
-    // net = 5000 - 3000 + 2000 = 4000
-    expect(s.balance.net).toBe(4000);
+    // Gastos: 5000 - 3000 = 2000 (esto se salda al cerrar)
+    expect(s.gastosBalance.net).toBe(2000);
+    // Préstamos: 2000 aparte (esto se arrastra)
+    expect(s.prestamosBalance.net).toBe(2000);
   });
 });
 

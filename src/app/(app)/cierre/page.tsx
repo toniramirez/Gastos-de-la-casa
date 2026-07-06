@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, PartyPopper, Scale } from "lucide-react";
+import { CheckCircle2, HandCoins, PartyPopper, Scale } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { useNames, useToast } from "@/components/Providers";
 import { api } from "@/lib/client";
@@ -90,7 +90,7 @@ export default function CierrePage() {
         <div className="relative">
           <div className="flex items-center gap-2 text-white/80">
             <Scale className="h-4 w-4" />
-            <span className="text-sm font-medium">Resultado final</span>
+            <span className="text-sm font-medium">Resultado de gastos</span>
           </div>
           {settlement ? (
             <div className="mt-2">
@@ -98,14 +98,14 @@ export default function CierrePage() {
                 {formatMoney(settlement.amount)}
               </p>
               <p className="mt-1.5 text-white/90">
-                Para dejar la cuenta en cero,{" "}
+                Para saldar los gastos del período,{" "}
                 <span className="font-semibold">{names[settlement.from]}</span> le tiene que pagar a{" "}
                 <span className="font-semibold">{names[settlement.to]}</span>.
               </p>
             </div>
           ) : (
             <p className="mt-2 flex items-center gap-2 text-2xl font-bold">
-              <PartyPopper className="h-6 w-6" /> Están en cero
+              <PartyPopper className="h-6 w-6" /> Gastos en cero
             </p>
           )}
         </div>
@@ -118,11 +118,23 @@ export default function CierrePage() {
         <SummaryRow label={`Pagó ${names.sol}`} value={formatMoney(s.totalPagadoSol)} />
         <SummaryRow label={`Le correspondía a ${names.tony}`} value={formatMoney(s.correspondeTony)} />
         <SummaryRow label={`Le correspondía a ${names.sol}`} value={formatMoney(s.correspondeSol)} />
-        <SummaryRow
-          label="Préstamos netos"
-          value={prestamoLabel(s.prestamosNetos, names)}
-        />
       </Card>
+
+      {/* Préstamos: no se saldan acá, se arrastran al próximo período. */}
+      {s.prestamosBalance.debtor !== "even" && (
+        <Card className="mt-4 flex animate-fade-up items-start gap-3 border-amber-200/70 bg-amber-50/70">
+          <HandCoins className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
+          <div className="text-sm text-amber-900">
+            <p className="font-semibold">Préstamos pendientes: {formatMoney(s.prestamosBalance.amount)}</p>
+            <p className="mt-0.5 text-amber-700">
+              <span className="font-semibold">{names[s.prestamosBalance.debtor]}</span> le debe a{" "}
+              <span className="font-semibold">{names[s.prestamosBalance.creditor as "tony" | "sol"]}</span>.
+              Esto <span className="font-semibold">no se salda en el cierre</span>: se arrastra al
+              próximo período hasta que se registre la devolución.
+            </p>
+          </div>
+        </Card>
+      )}
 
       <Card className="mt-4 animate-fade-up delay-2">
         <Field label="Nombre del próximo período (opcional)" hint="Si lo dejás vacío, se numera solo.">
@@ -145,7 +157,8 @@ export default function CierrePage() {
           Marcar como pagado y cerrar período
         </Button>
         <p className="mt-2 px-2 text-center text-xs text-slate-400">
-          Se guarda el cierre, se pone la cuenta en cero y arranca un período nuevo.
+          Se salda la cuenta de gastos y arranca un período nuevo. Los préstamos pendientes se
+          mantienen.
         </p>
       </div>
 
@@ -155,8 +168,8 @@ export default function CierrePage() {
         title="¿Cerrar el período?"
         message={
           settlement
-            ? `Confirmá que ${names[settlement.from]} ya le pagó ${formatMoney(settlement.amount)} a ${names[settlement.to]}. Se cerrará este período y arrancará uno nuevo en cero.`
-            : "Se cerrará este período y arrancará uno nuevo en cero."
+            ? `Confirmá que ${names[settlement.from]} ya le pagó ${formatMoney(settlement.amount)} a ${names[settlement.to]} por los gastos. Se cerrará este período y arrancará uno nuevo. Los préstamos pendientes se mantienen.`
+            : "Se cerrará este período y arrancará uno nuevo. Los préstamos pendientes se mantienen."
         }
         confirmLabel="Sí, cerrar"
         loading={closing}
@@ -176,10 +189,3 @@ function SummaryRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function prestamoLabel(net: number, names: { tony: string; sol: string }): string {
-  if (net === 0) return "—";
-  // net > 0 => plata neta que fue de Tony a Sol => Sol le debe a Tony por préstamos.
-  const who = net > 0 ? names.sol : names.tony;
-  const to = net > 0 ? names.tony : names.sol;
-  return `${who} → ${to} ${formatMoney(Math.abs(net))}`;
-}

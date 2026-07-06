@@ -11,6 +11,14 @@
 // que Y le debe más a X (o que X le debe menos a Y). Por eso el efecto sobre
 // el balance de cualquier movimiento entre ellos es simplemente el flujo de
 // plata: si la plata va de Tony a Sol, Sol le debe más a Tony.
+//
+// IMPORTANTE — dos cuentas separadas:
+//   1. Balance de GASTOS: solo los gastos del período. Es lo que se salda al
+//      cerrar (se pasan la plata y quedan en cero). Se resetea cada cierre.
+//   2. Deuda de PRÉSTAMOS: la plata que uno le prestó al otro y todavía no le
+//      devolvió. NO entra en el cierre: se arrastra entre períodos hasta que
+//      aparezca una devolución. Por eso se calcula sobre TODOS los préstamos,
+//      no solo los del período actual.
 // ==========================================================================
 
 import type {
@@ -52,15 +60,32 @@ export function balanceFromNet(net: number): Balance {
   return { net: rounded, debtor: "tony", creditor: "sol", amount: -rounded };
 }
 
-/** Calcula el balance combinando gastos y préstamos. */
-export function computeBalance(expenses: Expense[], loans: Loan[]): Balance {
+/**
+ * Balance SOLO de los gastos de un período. Es lo que se salda al cerrar.
+ * (positivo = Sol le debe a Tony).
+ */
+export function computeExpenseBalance(expenses: Expense[]): Balance {
   let net = 0;
   for (const e of expenses) net += expenseDelta(e);
+  return balanceFromNet(net);
+}
+
+/**
+ * Deuda de préstamos: cuánta plata prestada falta devolver. Se calcula sobre
+ * TODOS los préstamos/devoluciones (de todos los períodos), porque se arrastra
+ * entre períodos y no se salda al cerrar (positivo = Sol le debe a Tony).
+ */
+export function computeLoanBalance(loans: Loan[]): Balance {
+  let net = 0;
   for (const l of loans) net += loanDelta(l);
   return balanceFromNet(net);
 }
 
-/** Resumen completo del período: totales + balance. */
+/**
+ * Resumen del período. `expenses` son los gastos del período; `loans` son
+ * TODOS los préstamos/devoluciones (la deuda de préstamos se arrastra y no se
+ * limita al período actual).
+ */
 export function computeSummary(
   period: Period | null,
   expenses: Expense[],
@@ -80,9 +105,6 @@ export function computeSummary(
     correspondeSol += e.share_sol;
   }
 
-  let prestamosNetos = 0;
-  for (const l of loans) prestamosNetos += loanDelta(l);
-
   return {
     period,
     totalGastado,
@@ -90,8 +112,8 @@ export function computeSummary(
     totalPagadoSol,
     correspondeTony,
     correspondeSol,
-    prestamosNetos,
-    balance: computeBalance(expenses, loans),
+    gastosBalance: computeExpenseBalance(expenses),
+    prestamosBalance: computeLoanBalance(loans),
     cantidadGastos: expenses.length,
     cantidadPrestamos: loans.length,
   };

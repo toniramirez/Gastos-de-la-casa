@@ -61,6 +61,8 @@ export default function DashboardPage() {
 
           <BalanceCard data={data} />
 
+          <PrestamosCard data={data} />
+
           <div className="grid grid-cols-2 gap-3">
             <StatCard
               label="Total gastado"
@@ -97,7 +99,7 @@ export default function DashboardPage() {
 
 function BalanceCard({ data }: { data: SummaryResponse }) {
   const { names } = useNames();
-  const { balance } = data.summary;
+  const balance = data.summary.gastosBalance;
   const even = balance.debtor === "even";
 
   const debtorName = balance.debtor !== "even" ? names[balance.debtor] : "";
@@ -118,7 +120,7 @@ function BalanceCard({ data }: { data: SummaryResponse }) {
       <div className="relative">
         <div className="flex items-center gap-2 text-white/75">
           <Scale className="h-4 w-4" />
-          <p className="text-sm font-medium">Balance del período</p>
+          <p className="text-sm font-medium">Balance de gastos del período</p>
         </div>
         {even ? (
           <p className="mt-3 flex items-center gap-2 text-2xl font-bold">
@@ -137,6 +139,38 @@ function BalanceCard({ data }: { data: SummaryResponse }) {
         )}
       </div>
     </div>
+  );
+}
+
+/** Deuda de préstamos acumulada. Va aparte del balance de gastos porque no se
+ *  salda al cerrar: se arrastra hasta que aparece una devolución. */
+function PrestamosCard({ data }: { data: SummaryResponse }) {
+  const { names } = useNames();
+  const balance = data.summary.prestamosBalance;
+  const even = balance.debtor === "even";
+
+  if (even) return null;
+
+  const debtorName = balance.debtor !== "even" ? names[balance.debtor] : "";
+  const creditorName = balance.creditor !== "even" ? names[balance.creditor] : "";
+
+  return (
+    <Card className="flex animate-fade-up items-center gap-3 border-amber-200/70 bg-amber-50/70 delay-1">
+      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 text-white shadow-glow-sm">
+        <HandCoins className="h-5 w-5" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-medium text-amber-700">Préstamos pendientes</p>
+        <p className="mt-0.5 text-sm text-amber-900">
+          <span className="font-semibold">{debtorName}</span> le debe a{" "}
+          <span className="font-semibold">{creditorName}</span>
+        </p>
+        <p className="text-[11px] text-amber-600/80">Se arrastra hasta la devolución</p>
+      </div>
+      <span className="shrink-0 text-lg font-bold text-amber-900">
+        {formatMoney(balance.amount)}
+      </span>
+    </Card>
   );
 }
 

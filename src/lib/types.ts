@@ -142,9 +142,10 @@ export interface PeriodSummary {
   totalPagadoSol: number;
   correspondeTony: number;
   correspondeSol: number;
-  /** Efecto neto de los préstamos sobre el balance (positivo hacia Tony). */
-  prestamosNetos: number;
-  balance: Balance;
+  /** Balance de los gastos del período. Es lo que se salda al cerrar. */
+  gastosBalance: Balance;
+  /** Deuda de préstamos acumulada (se arrastra entre períodos, no se cierra). */
+  prestamosBalance: Balance;
   cantidadGastos: number;
   cantidadPrestamos: number;
 }
