@@ -18,27 +18,22 @@ export function PageHeader({
   right?: React.ReactNode;
 }) {
   const router = useRouter();
+  const backBtn =
+    "press flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white/80 text-slate-600 shadow-card ring-1 ring-slate-900/5 backdrop-blur-sm hover:text-brand-600";
   return (
-    <header className="mb-4 flex items-center gap-3">
+    <header className="mb-5 flex animate-fade-up items-center gap-3">
       {back &&
         (typeof back === "string" ? (
-          <Link
-            href={back}
-            className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-slate-600 shadow-card"
-          >
+          <Link href={back} className={backBtn} aria-label="Volver">
             <ChevronLeft className="h-5 w-5" />
           </Link>
         ) : (
-          <button
-            onClick={() => router.back()}
-            className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-slate-600 shadow-card"
-            aria-label="Volver"
-          >
+          <button onClick={() => router.back()} className={backBtn} aria-label="Volver">
             <ChevronLeft className="h-5 w-5" />
           </button>
         ))}
       <div className="flex-1">
-        <h1 className="text-xl font-bold text-slate-900">{title}</h1>
+        <h1 className="text-xl font-bold tracking-tight text-slate-900">{title}</h1>
         {subtitle && <p className="text-sm text-slate-400">{subtitle}</p>}
       </div>
       {right}

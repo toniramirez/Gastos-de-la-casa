@@ -4,8 +4,8 @@ import { forwardRef } from "react";
 import { cn } from "@/lib/cn";
 
 const baseControl =
-  "w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 " +
-  "placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100 " +
+  "w-full rounded-2xl border border-slate-200 bg-white/80 px-4 py-3 text-slate-900 transition-all duration-200 " +
+  "placeholder:text-slate-400 focus:border-brand-500 focus:bg-white focus:outline-none focus:ring-4 focus:ring-brand-500/15 " +
   "disabled:bg-slate-50 disabled:text-slate-400";
 
 export function Field({

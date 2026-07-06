@@ -77,7 +77,7 @@ export function LoanForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="rounded-3xl bg-white p-4 shadow-card">
+      <div className="rounded-3xl bg-white/90 p-4 shadow-card ring-1 ring-slate-900/5 backdrop-blur-sm">
         <span className="mb-2 block text-sm font-medium text-slate-700">Tipo de movimiento</span>
         <div className="grid grid-cols-2 gap-2">
           {(["prestamo", "devolucion"] as LoanType[]).map((t) => (
@@ -86,10 +86,10 @@ export function LoanForm({
               type="button"
               onClick={() => setV((prev) => ({ ...prev, type: t }))}
               className={cn(
-                "h-12 rounded-2xl border-2 font-semibold transition-colors",
+                "press h-12 rounded-2xl border-2 font-semibold transition-all duration-200",
                 v.type === t
-                  ? "border-brand-500 bg-brand-50 text-brand-700"
-                  : "border-slate-200 bg-white text-slate-500"
+                  ? "border-brand-500 bg-brand-50 text-brand-700 shadow-glow-sm"
+                  : "border-slate-200 bg-white/70 text-slate-500 hover:border-slate-300"
               )}
             >
               {t === "prestamo" ? "Préstamo" : "Devolución"}
@@ -98,7 +98,7 @@ export function LoanForm({
         </div>
       </div>
 
-      <div className="rounded-3xl bg-white p-4 shadow-card">
+      <div className="rounded-3xl bg-white/90 p-4 shadow-card ring-1 ring-slate-900/5 backdrop-blur-sm">
         <span className="mb-2 block text-sm font-medium text-slate-700">
           ¿Quién {v.type === "prestamo" ? "presta" : "devuelve"}?
         </span>
@@ -108,12 +108,12 @@ export function LoanForm({
         </p>
       </div>
 
-      <div className="rounded-3xl bg-white p-4 shadow-card">
+      <div className="rounded-3xl bg-white/90 p-4 shadow-card ring-1 ring-slate-900/5 backdrop-blur-sm">
         <span className="mb-1.5 block text-sm font-medium text-slate-700">Monto</span>
         <MoneyInput value={v.amount} onChange={(n) => setV((prev) => ({ ...prev, amount: n }))} autoFocus />
       </div>
 
-      <div className="space-y-4 rounded-3xl bg-white p-4 shadow-card">
+      <div className="space-y-4 rounded-3xl bg-white/90 p-4 shadow-card ring-1 ring-slate-900/5 backdrop-blur-sm">
         <Field label="Fecha">
           <Input type="date" value={v.date} onChange={(e) => setV((prev) => ({ ...prev, date: e.target.value }))} />
         </Field>

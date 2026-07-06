@@ -54,7 +54,7 @@ export function MoneyInput({
           const n = Math.round(parseMoney(text));
           setText(n ? formatNumber(n) : "");
         }}
-        className="w-full rounded-2xl border border-slate-200 bg-white py-3 pl-9 pr-4 text-lg font-semibold text-slate-900 placeholder:text-slate-300 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100 disabled:bg-slate-50"
+        className="w-full rounded-2xl border border-slate-200 bg-white/80 py-3 pl-9 pr-4 text-lg font-semibold text-slate-900 transition-all duration-200 placeholder:text-slate-300 focus:border-brand-500 focus:bg-white focus:outline-none focus:ring-4 focus:ring-brand-500/15 disabled:bg-slate-50"
       />
     </div>
   );

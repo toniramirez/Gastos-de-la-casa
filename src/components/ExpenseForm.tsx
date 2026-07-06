@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { Check } from "lucide-react";
 import { computeShares } from "@/lib/balance";
 import { formatMoney, todayISO } from "@/lib/format";
 import { CATEGORIES, type Category, type Person, type SplitType } from "@/lib/types";
@@ -115,18 +116,18 @@ export function ExpenseForm({
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       {/* Monto: lo más importante, arriba y grande. */}
-      <div className="rounded-3xl bg-white p-4 shadow-card">
+      <div className="rounded-3xl bg-white/90 p-4 shadow-card ring-1 ring-slate-900/5 backdrop-blur-sm">
         <span className="mb-1.5 block text-sm font-medium text-slate-700">Monto total</span>
         <MoneyInput value={v.total} onChange={(n) => set("total", n)} autoFocus={!initial?.total} />
       </div>
 
-      <div className="rounded-3xl bg-white p-4 shadow-card">
+      <div className="rounded-3xl bg-white/90 p-4 shadow-card ring-1 ring-slate-900/5 backdrop-blur-sm">
         <span className="mb-2 block text-sm font-medium text-slate-700">¿Quién pagó?</span>
         <PersonToggle value={v.paid_by} onChange={(p) => set("paid_by", p)} />
       </div>
 
       {/* División */}
-      <div className="rounded-3xl bg-white p-4 shadow-card">
+      <div className="rounded-3xl bg-white/90 p-4 shadow-card ring-1 ring-slate-900/5 backdrop-blur-sm">
         <span className="mb-2 block text-sm font-medium text-slate-700">¿Cómo se divide?</span>
         <div className="grid grid-cols-3 gap-2">
           {SPLIT_OPTIONS.map((opt) => (
@@ -135,10 +136,10 @@ export function ExpenseForm({
               type="button"
               onClick={() => set("split_type", opt.value)}
               className={cn(
-                "rounded-2xl border-2 px-2 py-2.5 text-[13px] font-semibold transition-colors",
+                "press rounded-2xl border-2 px-2 py-2.5 text-[13px] font-semibold transition-all duration-200",
                 v.split_type === opt.value
-                  ? "border-brand-500 bg-brand-50 text-brand-700"
-                  : "border-slate-200 bg-white text-slate-500"
+                  ? "border-brand-500 bg-brand-50 text-brand-700 shadow-glow-sm"
+                  : "border-slate-200 bg-white/70 text-slate-500 hover:border-slate-300"
               )}
             >
               {opt.label(names)}
@@ -174,13 +175,17 @@ export function ExpenseForm({
             </Field>
             <p
               className={cn(
-                "col-span-2 text-xs font-medium",
+                "col-span-2 flex items-center gap-1 text-xs font-medium",
                 Math.round(customRemaining) === 0 ? "text-emerald-600" : "text-amber-600"
               )}
             >
-              {Math.round(customRemaining) === 0
-                ? "✓ Las partes suman el total"
-                : `Falta asignar ${formatMoney(customRemaining)}`}
+              {Math.round(customRemaining) === 0 ? (
+                <>
+                  <Check className="h-3.5 w-3.5" /> Las partes suman el total
+                </>
+              ) : (
+                `Falta asignar ${formatMoney(customRemaining)}`
+              )}
             </p>
           </div>
         )}
@@ -197,7 +202,7 @@ export function ExpenseForm({
       </div>
 
       {/* Detalles */}
-      <div className="space-y-4 rounded-3xl bg-white p-4 shadow-card">
+      <div className="space-y-4 rounded-3xl bg-white/90 p-4 shadow-card ring-1 ring-slate-900/5 backdrop-blur-sm">
         <Field label="Descripción">
           <Input
             value={v.description}

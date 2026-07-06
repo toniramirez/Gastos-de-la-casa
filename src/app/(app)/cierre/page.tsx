@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, Scale } from "lucide-react";
+import { CheckCircle2, PartyPopper, Scale } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { useNames, useToast } from "@/components/Providers";
 import { api } from "@/lib/client";
@@ -13,6 +13,7 @@ import { Card } from "@/components/ui/Card";
 import { Field, Input } from "@/components/ui/Field";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { ErrorBlock, LoadingBlock } from "@/components/ui/States";
+import { cn } from "@/lib/cn";
 
 export default function CierrePage() {
   const router = useRouter();
@@ -42,7 +43,7 @@ export default function CierrePage() {
     setClosing(true);
     try {
       await api.post("/api/periods/close", { next_period_name: nextName.trim() || undefined });
-      toast("Período cerrado. Arrancás de cero 🎉", "success");
+      toast("Período cerrado. Arrancás de cero", "success");
       router.push("/");
       router.refresh();
     } catch (err) {
@@ -78,27 +79,40 @@ export default function CierrePage() {
       <PageHeader title="Cierre de período" subtitle={s.period?.name} back="/" />
 
       {/* Resultado principal */}
-      <Card className={settlement ? "bg-brand-600 text-white" : "bg-emerald-600 text-white"}>
-        <div className="flex items-center gap-2 text-white/80">
-          <Scale className="h-4 w-4" />
-          <span className="text-sm font-medium">Resultado final</span>
-        </div>
-        {settlement ? (
-          <div className="mt-2">
-            <p className="text-3xl font-bold">{formatMoney(settlement.amount)}</p>
-            <p className="mt-1 text-white/90">
-              Para dejar la cuenta en cero,{" "}
-              <span className="font-semibold">{names[settlement.from]}</span> le tiene que pagar a{" "}
-              <span className="font-semibold">{names[settlement.to]}</span>.
-            </p>
-          </div>
-        ) : (
-          <p className="mt-2 text-2xl font-bold">Están en cero 🎉</p>
+      <div
+        className={cn(
+          "relative animate-fade-up overflow-hidden rounded-3xl p-5 text-white shadow-glow",
+          settlement ? "bg-brand-mesh" : "bg-emerald-gradient"
         )}
-      </Card>
+        style={{ backgroundSize: "180% 180%" }}
+      >
+        <div className="pointer-events-none absolute -right-10 -top-12 h-40 w-40 rounded-full bg-white/20 blur-2xl animate-pulse-glow" />
+        <div className="relative">
+          <div className="flex items-center gap-2 text-white/80">
+            <Scale className="h-4 w-4" />
+            <span className="text-sm font-medium">Resultado final</span>
+          </div>
+          {settlement ? (
+            <div className="mt-2">
+              <p className="animate-count-in text-4xl font-bold tracking-tight">
+                {formatMoney(settlement.amount)}
+              </p>
+              <p className="mt-1.5 text-white/90">
+                Para dejar la cuenta en cero,{" "}
+                <span className="font-semibold">{names[settlement.from]}</span> le tiene que pagar a{" "}
+                <span className="font-semibold">{names[settlement.to]}</span>.
+              </p>
+            </div>
+          ) : (
+            <p className="mt-2 flex items-center gap-2 text-2xl font-bold">
+              <PartyPopper className="h-6 w-6" /> Están en cero
+            </p>
+          )}
+        </div>
+      </div>
 
       {/* Detalle */}
-      <Card className="mt-4 divide-y divide-slate-100">
+      <Card className="mt-4 animate-fade-up divide-y divide-slate-100 delay-1">
         <SummaryRow label="Total de gastos" value={formatMoney(s.totalGastado)} />
         <SummaryRow label={`Pagó ${names.tony}`} value={formatMoney(s.totalPagadoTony)} />
         <SummaryRow label={`Pagó ${names.sol}`} value={formatMoney(s.totalPagadoSol)} />
@@ -110,7 +124,7 @@ export default function CierrePage() {
         />
       </Card>
 
-      <Card className="mt-4">
+      <Card className="mt-4 animate-fade-up delay-2">
         <Field label="Nombre del próximo período (opcional)" hint="Si lo dejás vacío, se numera solo.">
           <Input
             value={nextName}
@@ -120,7 +134,7 @@ export default function CierrePage() {
         </Field>
       </Card>
 
-      <div className="mt-4">
+      <div className="mt-4 animate-fade-up delay-3">
         <Button
           size="lg"
           fullWidth

@@ -5,7 +5,9 @@
 // ==========================================================================
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { CheckCircle2, Info, XCircle } from "lucide-react";
 import { api } from "@/lib/client";
+import { cn } from "@/lib/cn";
 import type { SettingsResponse } from "@/lib/api-types";
 import type { Person } from "@/lib/types";
 
@@ -100,24 +102,31 @@ export function Providers({
   );
 }
 
+const TOAST_META: Record<ToastType, { icon: typeof Info; ring: string; iconCls: string }> = {
+  success: { icon: CheckCircle2, ring: "ring-emerald-500/20", iconCls: "text-emerald-500" },
+  error: { icon: XCircle, ring: "ring-rose-500/20", iconCls: "text-rose-500" },
+  info: { icon: Info, ring: "ring-brand-500/20", iconCls: "text-brand-500" },
+};
+
 function ToastViewport({ toasts }: { toasts: Toast[] }) {
   return (
     <div className="pointer-events-none fixed inset-x-0 top-3 z-50 flex flex-col items-center gap-2 px-4">
-      {toasts.map((t) => (
-        <div
-          key={t.id}
-          className={[
-            "pointer-events-auto w-full max-w-sm rounded-2xl px-4 py-3 text-sm font-medium shadow-soft",
-            t.type === "success"
-              ? "bg-emerald-600 text-white"
-              : t.type === "error"
-                ? "bg-rose-600 text-white"
-                : "bg-slate-800 text-white",
-          ].join(" ")}
-        >
-          {t.message}
-        </div>
-      ))}
+      {toasts.map((t) => {
+        const { icon: Icon, ring, iconCls } = TOAST_META[t.type];
+        return (
+          <div
+            key={t.id}
+            className={cn(
+              "glass pointer-events-auto flex w-full max-w-sm animate-slide-down items-center gap-3 rounded-2xl px-4 py-3",
+              "text-sm font-medium text-slate-800 shadow-float ring-1",
+              ring
+            )}
+          >
+            <Icon className={cn("h-5 w-5 shrink-0", iconCls)} />
+            <span>{t.message}</span>
+          </div>
+        );
+      })}
     </div>
   );
 }

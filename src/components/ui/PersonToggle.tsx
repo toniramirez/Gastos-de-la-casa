@@ -40,15 +40,17 @@ function Option({
 }) {
   const activeCls =
     color === "tony"
-      ? "border-tony bg-tony-soft text-tony"
-      : "border-sol bg-sol-soft text-sol";
+      ? "border-tony bg-tony-soft text-tony-deep shadow-[0_8px_20px_-8px_rgba(14,165,233,0.5)]"
+      : "border-sol bg-sol-soft text-sol-deep shadow-[0_8px_20px_-8px_rgba(236,72,153,0.5)]";
   return (
     <button
       type="button"
       onClick={onClick}
       className={cn(
-        "h-12 rounded-2xl border-2 font-semibold transition-colors",
-        active ? activeCls : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+        "press h-12 rounded-2xl border-2 font-semibold transition-all duration-200",
+        active
+          ? cn(activeCls, "scale-[1.02]")
+          : "border-slate-200 bg-white/70 text-slate-500 hover:border-slate-300 hover:bg-white"
       )}
     >
       {children}

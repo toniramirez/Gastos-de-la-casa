@@ -13,8 +13,19 @@ html {
 }
 
 body {
-  @apply bg-slate-50 text-slate-900 antialiased;
+  @apply text-slate-900 antialiased;
   font-family: var(--font-sans);
+  color: #1a1436;
+  /* Lienzo premium: base clara con glows de marca sutiles y fijos. */
+  background-color: #f6f5fb;
+  background-image: radial-gradient(
+      68% 48% at 8% -4%,
+      rgba(122, 99, 245, 0.16) 0%,
+      transparent 60%
+    ),
+    radial-gradient(60% 44% at 100% 6%, rgba(192, 38, 211, 0.12) 0%, transparent 55%),
+    radial-gradient(80% 60% at 50% 120%, rgba(14, 165, 233, 0.1) 0%, transparent 60%);
+  background-attachment: fixed;
   /* Evita el zoom raro y el scroll horizontal en mobile. */
   overscroll-behavior-y: none;
 }
@@ -37,6 +48,21 @@ input[type="number"] {
   -moz-appearance: textfield;
 }
 
+@layer components {
+  /* Vidrio esmerilado premium para tarjetas y navegación. */
+  .glass {
+    background-color: rgba(255, 255, 255, 0.72);
+    backdrop-filter: saturate(180%) blur(20px);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.7);
+  }
+  .glass-nav {
+    background-color: rgba(255, 255, 255, 0.78);
+    backdrop-filter: saturate(180%) blur(22px);
+    -webkit-backdrop-filter: saturate(180%) blur(22px);
+  }
+}
+
 @layer utilities {
   .safe-bottom {
     padding-bottom: calc(env(safe-area-inset-bottom) + 1rem);
@@ -47,5 +73,66 @@ input[type="number"] {
   .no-scrollbar {
     -ms-overflow-style: none;
     scrollbar-width: none;
+  }
+
+  /* Texto con degradé de marca. */
+  .text-gradient {
+    background: linear-gradient(120deg, #7a63f5 0%, #6a48ea 45%, #c026d3 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  /* Brillo que barre por encima (botones/hero). */
+  .sheen-overlay {
+    position: relative;
+    overflow: hidden;
+  }
+  .sheen-overlay::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      110deg,
+      transparent 30%,
+      rgba(255, 255, 255, 0.35) 50%,
+      transparent 70%
+    );
+    transform: translateX(-100%);
+    transition: transform 0.9s cubic-bezier(0.22, 1, 0.36, 1);
+    pointer-events: none;
+  }
+  .sheen-overlay:hover::after,
+  .sheen-overlay:active::after {
+    transform: translateX(100%);
+  }
+
+  /* Presión táctil con resorte. */
+  .press {
+    transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.2s ease;
+  }
+  .press:active {
+    transform: scale(0.96);
+  }
+
+  /* Retardos para entradas escalonadas. */
+  .delay-0 { animation-delay: 0ms; }
+  .delay-1 { animation-delay: 60ms; }
+  .delay-2 { animation-delay: 120ms; }
+  .delay-3 { animation-delay: 180ms; }
+  .delay-4 { animation-delay: 240ms; }
+  .delay-5 { animation-delay: 300ms; }
+  .delay-6 { animation-delay: 360ms; }
+  .delay-7 { animation-delay: 420ms; }
+}
+
+/* Respeta la preferencia de menos movimiento. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
   }
 }

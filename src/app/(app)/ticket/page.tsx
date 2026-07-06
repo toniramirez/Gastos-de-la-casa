@@ -66,9 +66,9 @@ export default function TicketPage() {
       />
 
       {step === "capture" && (
-        <div className="space-y-4">
+        <div className="animate-fade-up space-y-4">
           <Card className="flex flex-col items-center gap-4 py-10 text-center">
-            <span className="flex h-16 w-16 items-center justify-center rounded-3xl bg-violet-100 text-violet-600">
+            <span className="flex h-16 w-16 items-center justify-center rounded-3xl bg-gradient-to-br from-violet-500 to-fuchsia-600 text-white shadow-glow animate-float">
               <Camera className="h-8 w-8" />
             </span>
             <div>
@@ -96,10 +96,14 @@ export default function TicketPage() {
       )}
 
       {step === "analyzing" && (
-        <div className="space-y-4">
+        <div className="animate-fade-in space-y-4">
           {preview && (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={preview} alt="Ticket" className="max-h-64 w-full rounded-3xl object-contain" />
+            <img
+              src={preview}
+              alt="Ticket"
+              className="max-h-64 w-full animate-scale-in rounded-3xl object-contain shadow-card ring-1 ring-slate-900/5"
+            />
           )}
           <Card className="flex items-center justify-center gap-3 py-8">
             <Sparkles className="h-5 w-5 animate-pulse text-violet-500" />
@@ -109,7 +113,7 @@ export default function TicketPage() {
       )}
 
       {step === "review" && result && (
-        <div className="space-y-4">
+        <div className="animate-fade-up space-y-4">
           <DetectedCard result={result} />
           <div className="px-1">
             <h2 className="text-sm font-semibold text-slate-500">

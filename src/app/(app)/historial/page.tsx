@@ -102,14 +102,16 @@ export default function HistorialPage() {
       <PageHeader title="Historial" subtitle={periodLabel} />
 
       {/* Tabs */}
-      <div className="mb-3 grid grid-cols-2 gap-2 rounded-2xl bg-slate-100 p-1">
+      <div className="mb-3 grid grid-cols-2 gap-2 rounded-2xl bg-slate-200/60 p-1 backdrop-blur-sm">
         {(["gastos", "prestamos"] as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
             className={cn(
-              "rounded-xl py-2 text-sm font-semibold transition-colors",
-              tab === t ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"
+              "rounded-xl py-2 text-sm font-semibold transition-all duration-300",
+              tab === t
+                ? "bg-white text-brand-700 shadow-card"
+                : "text-slate-500 hover:text-slate-700"
             )}
           >
             {t === "gastos" ? "Gastos" : "Préstamos"}
@@ -124,7 +126,7 @@ export default function HistorialPage() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Buscar por descripción o comercio…"
-          className="w-full rounded-2xl border border-slate-200 bg-white py-2.5 pl-11 pr-4 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100"
+          className="w-full rounded-2xl border border-slate-200 bg-white/80 py-2.5 pl-11 pr-4 text-sm backdrop-blur-sm transition-all duration-200 focus:border-brand-500 focus:bg-white focus:outline-none focus:ring-4 focus:ring-brand-500/15"
         />
       </div>
 
@@ -181,10 +183,11 @@ export default function HistorialPage() {
           <EmptyState title="Sin gastos" description="No hay gastos para estos filtros." />
         ) : (
           <ul className="space-y-2">
-            {expenses.map((e) => (
+            {expenses.map((e, i) => (
               <ExpenseRow
                 key={e.id}
                 e={e}
+                index={i}
                 onEdit={() => router.push(`/gastos/${e.id}`)}
                 onDelete={() =>
                   confirm.ask("¿Eliminar gasto?", () => doDeleteExpense(e.id), `${e.description || e.merchant} · ${formatMoney(e.total)}`)
@@ -200,10 +203,11 @@ export default function HistorialPage() {
           <EmptyState title="Sin movimientos" description="No hay préstamos ni devoluciones para estos filtros." />
         ) : (
           <ul className="space-y-2">
-            {loans.map((l) => (
+            {loans.map((l, i) => (
               <LoanRow
                 key={l.id}
                 l={l}
+                index={i}
                 onEdit={() => router.push(`/prestamos/${l.id}`)}
                 onDelete={() =>
                   confirm.ask("¿Eliminar movimiento?", () => doDeleteLoan(l.id), formatMoney(l.amount))
@@ -226,11 +230,24 @@ export default function HistorialPage() {
   );
 }
 
-function ExpenseRow({ e, onEdit, onDelete }: { e: Expense; onEdit: () => void; onDelete: () => void }) {
+function ExpenseRow({
+  e,
+  index = 0,
+  onEdit,
+  onDelete,
+}: {
+  e: Expense;
+  index?: number;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
   const { names } = useNames();
   return (
-    <li className="flex items-center gap-3 rounded-3xl bg-white p-3.5 shadow-card">
-      <div className="min-w-0 flex-1" onClick={onEdit} role="button">
+    <li
+      className="flex animate-fade-up items-center gap-3 rounded-3xl bg-white/90 p-3.5 shadow-card ring-1 ring-slate-900/5 backdrop-blur-sm transition-shadow hover:shadow-soft"
+      style={{ animationDelay: `${Math.min(index, 8) * 45}ms` }}
+    >
+      <div className="min-w-0 flex-1 cursor-pointer" onClick={onEdit} role="button">
         <div className="flex items-center gap-2">
           <span className="truncate font-semibold text-slate-800">
             {e.description || e.merchant || e.category}
@@ -252,12 +269,25 @@ function ExpenseRow({ e, onEdit, onDelete }: { e: Expense; onEdit: () => void; o
   );
 }
 
-function LoanRow({ l, onEdit, onDelete }: { l: Loan; onEdit: () => void; onDelete: () => void }) {
+function LoanRow({
+  l,
+  index = 0,
+  onEdit,
+  onDelete,
+}: {
+  l: Loan;
+  index?: number;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
   const { names } = useNames();
   const verb = l.type === "prestamo" ? "prestó a" : "devolvió a";
   return (
-    <li className="flex items-center gap-3 rounded-3xl bg-white p-3.5 shadow-card">
-      <div className="min-w-0 flex-1" onClick={onEdit} role="button">
+    <li
+      className="flex animate-fade-up items-center gap-3 rounded-3xl bg-white/90 p-3.5 shadow-card ring-1 ring-slate-900/5 backdrop-blur-sm transition-shadow hover:shadow-soft"
+      style={{ animationDelay: `${Math.min(index, 8) * 45}ms` }}
+    >
+      <div className="min-w-0 flex-1 cursor-pointer" onClick={onEdit} role="button">
         <span className="truncate font-semibold text-slate-800">
           {names[l.from_person]} {verb} {names[l.to_person]}
         </span>
@@ -284,10 +314,10 @@ function LoanRow({ l, onEdit, onDelete }: { l: Loan; onEdit: () => void; onDelet
 function RowActions({ onEdit, onDelete }: { onEdit: () => void; onDelete: () => void }) {
   return (
     <div className="flex shrink-0 items-center gap-1">
-      <button onClick={onEdit} className="flex h-8 w-8 items-center justify-center rounded-xl text-slate-400 hover:bg-slate-100">
+      <button onClick={onEdit} className="press flex h-8 w-8 items-center justify-center rounded-xl text-slate-400 transition-colors hover:bg-brand-50 hover:text-brand-600">
         <Pencil className="h-4 w-4" />
       </button>
-      <button onClick={onDelete} className="flex h-8 w-8 items-center justify-center rounded-xl text-rose-400 hover:bg-rose-50">
+      <button onClick={onDelete} className="press flex h-8 w-8 items-center justify-center rounded-xl text-rose-400 transition-colors hover:bg-rose-50 hover:text-rose-600">
         <Trash2 className="h-4 w-4" />
       </button>
     </div>
