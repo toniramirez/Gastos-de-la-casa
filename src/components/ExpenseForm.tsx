@@ -4,7 +4,14 @@ import { useMemo, useState } from "react";
 import { Check } from "lucide-react";
 import { computeShares } from "@/lib/balance";
 import { formatMoney, todayISO } from "@/lib/format";
-import { CATEGORIES, type Category, type Person, type SplitType } from "@/lib/types";
+import {
+  CATEGORIES,
+  EXPENSE_GROUPS,
+  type Category,
+  type ExpenseGroup,
+  type Person,
+  type SplitType,
+} from "@/lib/types";
 import { useNames } from "@/components/Providers";
 import { Button } from "@/components/ui/Button";
 import { Field, Input, Select, Textarea } from "@/components/ui/Field";
@@ -17,6 +24,7 @@ export interface ExpenseFormValue {
   description: string;
   merchant: string;
   category: Category;
+  group: ExpenseGroup;
   total: number;
   paid_by: Person;
   split_type: SplitType;
@@ -33,6 +41,7 @@ export function emptyExpense(overrides?: Partial<ExpenseFormValue>): ExpenseForm
     description: "",
     merchant: "",
     category: "Supermercado",
+    group: "dia_a_dia",
     total: 0,
     paid_by: "tony",
     split_type: "50_50",
@@ -124,6 +133,28 @@ export function ExpenseForm({
       <div className="rounded-3xl bg-white/90 p-4 shadow-card ring-1 ring-slate-900/5 backdrop-blur-sm">
         <span className="mb-2 block text-sm font-medium text-slate-700">¿Quién pagó?</span>
         <PersonToggle value={v.paid_by} onChange={(p) => set("paid_by", p)} />
+      </div>
+
+      {/* Cuenta / grupo: separa el día a día de la tarjeta y los fijos. */}
+      <div className="rounded-3xl bg-white/90 p-4 shadow-card ring-1 ring-slate-900/5 backdrop-blur-sm">
+        <span className="mb-2 block text-sm font-medium text-slate-700">¿A qué cuenta va?</span>
+        <div className="grid grid-cols-3 gap-2">
+          {EXPENSE_GROUPS.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => set("group", opt.value)}
+              className={cn(
+                "press rounded-2xl border-2 px-2 py-2.5 text-[13px] font-semibold transition-all duration-200",
+                v.group === opt.value
+                  ? "border-brand-500 bg-brand-50 text-brand-700 shadow-glow-sm"
+                  : "border-slate-200 bg-white/70 text-slate-500 hover:border-slate-300"
+              )}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* División */}

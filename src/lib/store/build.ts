@@ -26,6 +26,7 @@ export function buildExpense(
     description: input.description ?? "",
     merchant: input.merchant ?? "",
     category: input.category,
+    group: input.group ?? "dia_a_dia",
     total: Math.round(input.total),
     paid_by: input.paid_by,
     split_type: input.split_type,

@@ -111,8 +111,41 @@ export default function CierrePage() {
         </div>
       </div>
 
+      {/* Desglose por cuenta: así arman los números, por partes. */}
+      {s.groups.some((g) => g.cantidad > 0) && (
+        <Card className="mt-4 animate-fade-up delay-1">
+          <p className="mb-1 text-sm font-semibold text-slate-700">Cómo se compone</p>
+          <ul className="divide-y divide-slate-100">
+            {s.groups
+              .filter((g) => g.cantidad > 0)
+              .map((g) => (
+                <li key={g.group} className="flex items-center justify-between py-2.5">
+                  <div>
+                    <p className="text-sm font-medium text-slate-700">{g.label}</p>
+                    <p className="text-xs text-slate-400">
+                      {g.cantidad} {g.cantidad === 1 ? "gasto" : "gastos"} · {formatMoney(g.totalGastado)}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    {g.balance.debtor === "even" ? (
+                      <span className="text-sm font-semibold text-emerald-600">En cero</span>
+                    ) : (
+                      <>
+                        <p className="text-sm font-bold text-slate-800">{formatMoney(g.balance.amount)}</p>
+                        <p className="text-[11px] text-slate-400">
+                          {names[g.balance.debtor]} → {names[g.balance.creditor as "tony" | "sol"]}
+                        </p>
+                      </>
+                    )}
+                  </div>
+                </li>
+              ))}
+          </ul>
+        </Card>
+      )}
+
       {/* Detalle */}
-      <Card className="mt-4 animate-fade-up divide-y divide-slate-100 delay-1">
+      <Card className="mt-4 animate-fade-up divide-y divide-slate-100 delay-2">
         <SummaryRow label="Total de gastos" value={formatMoney(s.totalGastado)} />
         <SummaryRow label={`Pagó ${names.tony}`} value={formatMoney(s.totalPagadoTony)} />
         <SummaryRow label={`Pagó ${names.sol}`} value={formatMoney(s.totalPagadoSol)} />

@@ -21,13 +21,15 @@
 //      no solo los del período actual.
 // ==========================================================================
 
-import type {
-  Balance,
-  Expense,
-  Loan,
-  Period,
-  PeriodSummary,
-  Person,
+import {
+  EXPENSE_GROUPS,
+  type Balance,
+  type Expense,
+  type GroupSummary,
+  type Loan,
+  type Period,
+  type PeriodSummary,
+  type Person,
 } from "./types";
 
 /** Delta que aporta un gasto al balance (positivo = Sol le debe a Tony). */
@@ -112,11 +114,37 @@ export function computeSummary(
     totalPagadoSol,
     correspondeTony,
     correspondeSol,
+    groups: groupSummaries(expenses),
     gastosBalance: computeExpenseBalance(expenses),
     prestamosBalance: computeLoanBalance(loans),
     cantidadGastos: expenses.length,
     cantidadPrestamos: loans.length,
   };
+}
+
+/** Arma el desglose por grupo (día a día / tarjeta / fijos). Los gastos sin
+ *  grupo cuentan como "día a día". */
+export function groupSummaries(expenses: Expense[]): GroupSummary[] {
+  return EXPENSE_GROUPS.map(({ value, label }) => {
+    const items = expenses.filter((e) => (e.group ?? "dia_a_dia") === value);
+    let totalGastado = 0;
+    let totalPagadoTony = 0;
+    let totalPagadoSol = 0;
+    for (const e of items) {
+      totalGastado += e.total;
+      if (e.paid_by === "tony") totalPagadoTony += e.total;
+      else totalPagadoSol += e.total;
+    }
+    return {
+      group: value,
+      label,
+      totalGastado,
+      totalPagadoTony,
+      totalPagadoSol,
+      balance: computeExpenseBalance(items),
+      cantidad: items.length,
+    };
+  });
 }
 
 /**

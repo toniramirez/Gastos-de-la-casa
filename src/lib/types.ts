@@ -35,6 +35,20 @@ export type SplitType =
 /** Origen de un gasto: cargado a mano o leído de un ticket. */
 export type ExpenseSource = "manual" | "ticket";
 
+/** Grupo/cuenta al que pertenece un gasto. Sirve para hacer los números por
+ *  partes: primero el día a día, después la tarjeta y los fijos. */
+export type ExpenseGroup = "dia_a_dia" | "tarjeta" | "fijos";
+
+export const EXPENSE_GROUPS: { value: ExpenseGroup; label: string }[] = [
+  { value: "dia_a_dia", label: "Día a día" },
+  { value: "tarjeta", label: "Tarjeta" },
+  { value: "fijos", label: "Fijos" },
+];
+
+export function groupLabel(group: ExpenseGroup): string {
+  return EXPENSE_GROUPS.find((g) => g.value === group)?.label ?? group;
+}
+
 export type PeriodStatus = "open" | "closed";
 
 export interface Period {
@@ -53,6 +67,7 @@ export interface Expense {
   description: string;
   merchant: string;
   category: Category;
+  group: ExpenseGroup; // día a día / tarjeta / fijos
   total: number; // ARS, entero
   paid_by: Person;
   split_type: SplitType;
@@ -135,6 +150,18 @@ export interface Balance {
   amount: number;
 }
 
+/** Números de un grupo de gastos (día a día / tarjeta / fijos) por separado. */
+export interface GroupSummary {
+  group: ExpenseGroup;
+  label: string;
+  totalGastado: number;
+  totalPagadoTony: number;
+  totalPagadoSol: number;
+  /** Quién le debe a quién solo dentro de este grupo. */
+  balance: Balance;
+  cantidad: number;
+}
+
 export interface PeriodSummary {
   period: Period | null;
   totalGastado: number;
@@ -142,7 +169,10 @@ export interface PeriodSummary {
   totalPagadoSol: number;
   correspondeTony: number;
   correspondeSol: number;
-  /** Balance de los gastos del período. Es lo que se salda al cerrar. */
+  /** Desglose por grupo: día a día, tarjeta, fijos. */
+  groups: GroupSummary[];
+  /** Balance combinado de todos los gastos del período. Es el total que se
+   *  salda al cerrar: cuánto le tiene que dar uno al otro. */
   gastosBalance: Balance;
   /** Deuda de préstamos acumulada (se arrastra entre períodos, no se cierra). */
   prestamosBalance: Balance;

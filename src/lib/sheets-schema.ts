@@ -14,6 +14,7 @@ export const SHEETS = {
     "description",
     "merchant",
     "category",
+    "group",
     "total",
     "paid_by",
     "split_type",

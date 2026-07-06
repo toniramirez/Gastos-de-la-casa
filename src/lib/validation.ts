@@ -24,6 +24,7 @@ export const expenseInputSchema = z
     description: z.string().trim().max(200).default(""),
     merchant: z.string().trim().max(120).default(""),
     category: z.enum(CATEGORIES),
+    group: z.enum(["dia_a_dia", "tarjeta", "fijos"]).default("dia_a_dia"),
     total: amountSchema.refine((v) => v > 0, "El total debe ser mayor a 0"),
     paid_by: personSchema,
     split_type: splitTypeSchema,

@@ -7,6 +7,7 @@ import { makeId } from "../ids";
 import type {
   Category,
   Expense,
+  ExpenseGroup,
   ExpenseSource,
   Loan,
   LoanType,
@@ -63,6 +64,7 @@ function rowToExpense(r: Record<string, string>): Expense {
     description: r.description,
     merchant: r.merchant,
     category: (r.category as Category) || "Otros",
+    group: (r.group as ExpenseGroup) || "dia_a_dia",
     total: num(r.total),
     paid_by: person(r.paid_by),
     split_type: (r.split_type as SplitType) || "50_50",

@@ -19,6 +19,7 @@ function makeExpense(partial: Partial<Expense>): Expense {
     description: "",
     merchant: "",
     category: "Otros",
+    group: "dia_a_dia",
     total: 0,
     paid_by: "tony",
     split_type: "50_50",
@@ -177,6 +178,32 @@ describe("computeSummary", () => {
     expect(s.gastosBalance.net).toBe(2000);
     // Préstamos: 2000 aparte (esto se arrastra)
     expect(s.prestamosBalance.net).toBe(2000);
+  });
+
+  it("desglosa el balance por grupo y el total combinado cuadra", () => {
+    const expenses = [
+      // Día a día: Tony paga 10000 50/50 => +5000 (Sol le debe 5000)
+      makeExpense({ group: "dia_a_dia", total: 10000, paid_by: "tony", share_tony: 5000, share_sol: 5000 }),
+      // Tarjeta (la paga Sol): 8000, mitad de Tony => Tony le debe 4000 => -4000
+      makeExpense({ group: "tarjeta", total: 8000, paid_by: "sol", share_tony: 4000, share_sol: 4000 }),
+      // Fijos: alquiler 30000 que paga Sol, 50/50 => Tony le debe 15000 => -15000
+      makeExpense({ group: "fijos", total: 30000, paid_by: "sol", share_tony: 15000, share_sol: 15000 }),
+    ];
+    const s = computeSummary(null, expenses, []);
+
+    const dia = s.groups.find((g) => g.group === "dia_a_dia")!;
+    const tarjeta = s.groups.find((g) => g.group === "tarjeta")!;
+    const fijos = s.groups.find((g) => g.group === "fijos")!;
+
+    expect(dia.balance).toMatchObject({ debtor: "sol", creditor: "tony", amount: 5000 });
+    expect(tarjeta.balance).toMatchObject({ debtor: "tony", creditor: "sol", amount: 4000 });
+    expect(fijos.balance).toMatchObject({ debtor: "tony", creditor: "sol", amount: 15000 });
+
+    // Combinado: 5000 - 4000 - 15000 = -14000 => Tony le debe 14000 a Sol
+    expect(s.gastosBalance).toMatchObject({ net: -14000, debtor: "tony", creditor: "sol", amount: 14000 });
+    // La suma de los netos por grupo debe igualar el total.
+    const sumaGrupos = s.groups.reduce((acc, g) => acc + g.balance.net, 0);
+    expect(sumaGrupos).toBe(s.gastosBalance.net);
   });
 });
 

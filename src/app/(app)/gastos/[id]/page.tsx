@@ -42,6 +42,7 @@ export default function EditarGastoPage() {
         description: expense.description,
         merchant: expense.merchant,
         category: expense.category,
+        group: expense.group,
         total: expense.total,
         paid_by: expense.paid_by,
         split_type: expense.split_type,
