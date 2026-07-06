@@ -1,0 +1,17 @@
+import { handleError, ok } from "@/lib/api";
+import { getStore } from "@/lib/store";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+export async function GET() {
+  try {
+    const store = getStore();
+    // Aseguramos que siempre haya un período abierto.
+    await store.getOpenPeriod();
+    const periods = await store.listPeriods();
+    return ok(periods);
+  } catch (err) {
+    return handleError(err);
+  }
+}

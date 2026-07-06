@@ -1,0 +1,295 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { Pencil, Search, Trash2 } from "lucide-react";
+import { PageHeader } from "@/components/PageHeader";
+import { useNames, useToast } from "@/components/Providers";
+import { api } from "@/lib/client";
+import { formatDate, formatMoney } from "@/lib/format";
+import { CATEGORIES, type Expense, type Loan, type Period } from "@/lib/types";
+import { Select } from "@/components/ui/Field";
+import { ConfirmDialog, useConfirm } from "@/components/ui/ConfirmDialog";
+import { EmptyState, ErrorBlock, LoadingBlock } from "@/components/ui/States";
+import { cn } from "@/lib/cn";
+
+type Tab = "gastos" | "prestamos";
+
+export default function HistorialPage() {
+  const router = useRouter();
+  const { names } = useNames();
+  const { toast } = useToast();
+  const confirm = useConfirm();
+
+  const [tab, setTab] = useState<Tab>("gastos");
+  const [periods, setPeriods] = useState<Period[]>([]);
+  const [periodId, setPeriodId] = useState<string>("current");
+  const [category, setCategory] = useState<string>("");
+  const [paidBy, setPaidBy] = useState<string>("");
+  const [search, setSearch] = useState<string>("");
+
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [loans, setLoans] = useState<Loan[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  useEffect(() => {
+    api.get<Period[]>("/api/periods").then(setPeriods).catch(() => {});
+  }, []);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const params = new URLSearchParams();
+      params.set("periodId", periodId);
+      if (search.trim()) params.set("search", search.trim());
+      if (tab === "gastos") {
+        if (category) params.set("category", category);
+        if (paidBy) params.set("paidBy", paidBy);
+        setExpenses(await api.get<Expense[]>(`/api/expenses?${params}`));
+      } else {
+        setLoans(await api.get<Loan[]>(`/api/loans?${params}`));
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al cargar");
+    } finally {
+      setLoading(false);
+    }
+  }, [tab, periodId, category, paidBy, search]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function doDeleteExpense(id: string) {
+    setDeleting(true);
+    try {
+      await api.del(`/api/expenses/${id}`);
+      toast("Gasto eliminado", "success");
+      confirm.close();
+      void load();
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "No se pudo eliminar", "error");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  async function doDeleteLoan(id: string) {
+    setDeleting(true);
+    try {
+      await api.del(`/api/loans/${id}`);
+      toast("Movimiento eliminado", "success");
+      confirm.close();
+      void load();
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "No se pudo eliminar", "error");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  const periodLabel = useMemo(() => {
+    if (periodId === "current") return "Período actual";
+    if (periodId === "all") return "Todos";
+    return periods.find((p) => p.id === periodId)?.name ?? "Período";
+  }, [periodId, periods]);
+
+  return (
+    <div>
+      <PageHeader title="Historial" subtitle={periodLabel} />
+
+      {/* Tabs */}
+      <div className="mb-3 grid grid-cols-2 gap-2 rounded-2xl bg-slate-100 p-1">
+        {(["gastos", "prestamos"] as Tab[]).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={cn(
+              "rounded-xl py-2 text-sm font-semibold transition-colors",
+              tab === t ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"
+            )}
+          >
+            {t === "gastos" ? "Gastos" : "Préstamos"}
+          </button>
+        ))}
+      </div>
+
+      {/* Buscador */}
+      <div className="relative mb-3">
+        <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-300" />
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Buscar por descripción o comercio…"
+          className="w-full rounded-2xl border border-slate-200 bg-white py-2.5 pl-11 pr-4 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100"
+        />
+      </div>
+
+      {/* Filtros */}
+      <div className="mb-4 flex gap-2 overflow-x-auto no-scrollbar">
+        <Select
+          value={periodId}
+          onChange={(e) => setPeriodId(e.target.value)}
+          className="w-auto min-w-[8rem] py-2 text-sm"
+        >
+          <option value="current">Período actual</option>
+          <option value="all">Todos los períodos</option>
+          {periods
+            .filter((p) => p.status === "closed")
+            .map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+        </Select>
+
+        {tab === "gastos" && (
+          <>
+            <Select
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              className="w-auto min-w-[8rem] py-2 text-sm"
+            >
+              <option value="">Toda categoría</option>
+              {CATEGORIES.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </Select>
+            <Select
+              value={paidBy}
+              onChange={(e) => setPaidBy(e.target.value)}
+              className="w-auto min-w-[7rem] py-2 text-sm"
+            >
+              <option value="">Pagó cualquiera</option>
+              <option value="tony">Pagó {names.tony}</option>
+              <option value="sol">Pagó {names.sol}</option>
+            </Select>
+          </>
+        )}
+      </div>
+
+      {loading && <LoadingBlock />}
+      {error && !loading && <ErrorBlock message={error} onRetry={load} />}
+
+      {!loading && !error && tab === "gastos" && (
+        expenses.length === 0 ? (
+          <EmptyState title="Sin gastos" description="No hay gastos para estos filtros." />
+        ) : (
+          <ul className="space-y-2">
+            {expenses.map((e) => (
+              <ExpenseRow
+                key={e.id}
+                e={e}
+                onEdit={() => router.push(`/gastos/${e.id}`)}
+                onDelete={() =>
+                  confirm.ask("¿Eliminar gasto?", () => doDeleteExpense(e.id), `${e.description || e.merchant} · ${formatMoney(e.total)}`)
+                }
+              />
+            ))}
+          </ul>
+        )
+      )}
+
+      {!loading && !error && tab === "prestamos" && (
+        loans.length === 0 ? (
+          <EmptyState title="Sin movimientos" description="No hay préstamos ni devoluciones para estos filtros." />
+        ) : (
+          <ul className="space-y-2">
+            {loans.map((l) => (
+              <LoanRow
+                key={l.id}
+                l={l}
+                onEdit={() => router.push(`/prestamos/${l.id}`)}
+                onDelete={() =>
+                  confirm.ask("¿Eliminar movimiento?", () => doDeleteLoan(l.id), formatMoney(l.amount))
+                }
+              />
+            ))}
+          </ul>
+        )
+      )}
+
+      <ConfirmDialog
+        open={confirm.state.open}
+        title={confirm.state.title}
+        message={confirm.state.message}
+        loading={deleting}
+        onConfirm={() => confirm.state.onConfirm?.()}
+        onCancel={confirm.close}
+      />
+    </div>
+  );
+}
+
+function ExpenseRow({ e, onEdit, onDelete }: { e: Expense; onEdit: () => void; onDelete: () => void }) {
+  const { names } = useNames();
+  return (
+    <li className="flex items-center gap-3 rounded-3xl bg-white p-3.5 shadow-card">
+      <div className="min-w-0 flex-1" onClick={onEdit} role="button">
+        <div className="flex items-center gap-2">
+          <span className="truncate font-semibold text-slate-800">
+            {e.description || e.merchant || e.category}
+          </span>
+        </div>
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-400">
+          <span>{formatDate(e.date)}</span>
+          <span>·</span>
+          <span>{e.category}</span>
+          <span>·</span>
+          <span className={e.paid_by === "tony" ? "text-tony" : "text-sol"}>
+            pagó {names[e.paid_by]}
+          </span>
+        </div>
+      </div>
+      <span className="shrink-0 font-bold text-slate-900">{formatMoney(e.total)}</span>
+      <RowActions onEdit={onEdit} onDelete={onDelete} />
+    </li>
+  );
+}
+
+function LoanRow({ l, onEdit, onDelete }: { l: Loan; onEdit: () => void; onDelete: () => void }) {
+  const { names } = useNames();
+  const verb = l.type === "prestamo" ? "prestó a" : "devolvió a";
+  return (
+    <li className="flex items-center gap-3 rounded-3xl bg-white p-3.5 shadow-card">
+      <div className="min-w-0 flex-1" onClick={onEdit} role="button">
+        <span className="truncate font-semibold text-slate-800">
+          {names[l.from_person]} {verb} {names[l.to_person]}
+        </span>
+        <div className="mt-0.5 flex items-center gap-2 text-xs text-slate-400">
+          <span>{formatDate(l.date)}</span>
+          <span>·</span>
+          <span className={l.type === "prestamo" ? "text-amber-600" : "text-teal-600"}>
+            {l.type === "prestamo" ? "Préstamo" : "Devolución"}
+          </span>
+          {l.notes && (
+            <>
+              <span>·</span>
+              <span className="truncate">{l.notes}</span>
+            </>
+          )}
+        </div>
+      </div>
+      <span className="shrink-0 font-bold text-slate-900">{formatMoney(l.amount)}</span>
+      <RowActions onEdit={onEdit} onDelete={onDelete} />
+    </li>
+  );
+}
+
+function RowActions({ onEdit, onDelete }: { onEdit: () => void; onDelete: () => void }) {
+  return (
+    <div className="flex shrink-0 items-center gap-1">
+      <button onClick={onEdit} className="flex h-8 w-8 items-center justify-center rounded-xl text-slate-400 hover:bg-slate-100">
+        <Pencil className="h-4 w-4" />
+      </button>
+      <button onClick={onDelete} className="flex h-8 w-8 items-center justify-center rounded-xl text-rose-400 hover:bg-rose-50">
+        <Trash2 className="h-4 w-4" />
+      </button>
+    </div>
+  );
+}

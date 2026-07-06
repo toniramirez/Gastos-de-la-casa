@@ -1,0 +1,17 @@
+{
+  "name": "Gastos de la casa",
+  "short_name": "Gastos",
+  "description": "Gastos compartidos de la casa, simple y desde el celular.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#3385fb",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
