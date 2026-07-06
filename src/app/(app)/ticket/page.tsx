@@ -1,52 +1,170 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, Camera, ImageUp, Sparkles } from "lucide-react";
+import {
+  AlertTriangle,
+  Camera,
+  Clock,
+  ImageUp,
+  Sparkles,
+  Trash2,
+  Zap,
+} from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { ExpenseForm, type ExpenseFormValue } from "@/components/ExpenseForm";
 import { useToast } from "@/components/Providers";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { ConfirmDialog, useConfirm } from "@/components/ui/ConfirmDialog";
 import { api, ApiError } from "@/lib/client";
-import { compressImage } from "@/lib/image";
+import { compressImage, compressImageToLimit } from "@/lib/image";
 import { formatMoney } from "@/lib/format";
+import type { PendingTicket } from "@/lib/types";
 import type { TicketResult } from "@/lib/validation";
 
 type Step = "capture" | "analyzing" | "review";
+type CaptureMode = "scan" | "quick";
 
 export default function TicketPage() {
   const router = useRouter();
   const { toast } = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
+  const modeRef = useRef<CaptureMode>("scan");
+  const confirmDialog = useConfirm();
 
   const [step, setStep] = useState<Step>("capture");
   const [preview, setPreview] = useState<string | null>(null);
   const [result, setResult] = useState<TicketResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Modo rápido: fotos guardadas para confirmar más tarde.
+  const [pending, setPending] = useState<PendingTicket[]>([]);
+  const [quickSaving, setQuickSaving] = useState(false);
+  // Id del pendiente que estamos confirmando (para borrarlo al guardar).
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  const [discardingId, setDiscardingId] = useState<string | null>(null);
+
+  const loadPending = useCallback(async () => {
+    try {
+      setPending(await api.get<PendingTicket[]>("/api/ticket/pending"));
+    } catch {
+      // Silencioso: la lista de pendientes es secundaria.
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadPending();
+  }, [loadPending]);
+
+  function pick(mode: CaptureMode) {
+    modeRef.current = mode;
+    fileRef.current?.click();
+  }
+
   async function onPick(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
+    const mode = modeRef.current;
+    if (fileRef.current) fileRef.current.value = ""; // permite reelegir el mismo archivo
     if (!file) return;
+
+    if (mode === "quick") {
+      await quickSave(file);
+    } else {
+      await scanAndReview(file);
+    }
+  }
+
+  // --- Modo rápido: guardar la foto sin leerla ------------------------------
+  async function quickSave(file: File) {
     setError(null);
+    setQuickSaving(true);
+    try {
+      const image = await compressImageToLimit(file);
+      await api.post<PendingTicket>("/api/ticket/pending", { image });
+      toast("Foto guardada. La confirmás cuando quieras.", "success");
+      await loadPending();
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : "No se pudo guardar la foto";
+      setError(msg);
+      toast(msg, "error");
+    } finally {
+      setQuickSaving(false);
+    }
+  }
+
+  // --- Escaneo común: leer con IA y pasar a revisión ------------------------
+  async function scanAndReview(file: File) {
+    setError(null);
+    setPendingId(null);
     setStep("analyzing");
     try {
       const dataUrl = await compressImage(file);
       setPreview(dataUrl);
-      const res = await api.post<TicketResult>("/api/ticket/analyze", { image: dataUrl });
-      setResult(res);
-      setStep("review");
+      await analyze(dataUrl);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo leer el ticket");
       setStep("capture");
-    } finally {
-      // permite volver a elegir el mismo archivo
-      if (fileRef.current) fileRef.current.value = "";
     }
+  }
+
+  async function analyze(dataUrl: string) {
+    const res = await api.post<TicketResult>("/api/ticket/analyze", { image: dataUrl });
+    setResult(res);
+    setStep("review");
+  }
+
+  // --- Confirmar un pendiente: leerlo ahora y pasar a revisión --------------
+  async function confirmPending(p: PendingTicket) {
+    setError(null);
+    setPendingId(p.id);
+    setPreview(p.image);
+    setStep("analyzing");
+    try {
+      await analyze(p.image);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo leer el ticket");
+      setPendingId(null);
+      setStep("capture");
+    }
+  }
+
+  function discardPending(p: PendingTicket) {
+    confirmDialog.ask(
+      "¿Descartar esta foto?",
+      async () => {
+        setDiscardingId(p.id);
+        try {
+          await api.del(`/api/ticket/pending/${p.id}`);
+          await loadPending();
+        } catch {
+          toast("No se pudo descartar", "error");
+        } finally {
+          setDiscardingId(null);
+          confirmDialog.close();
+        }
+      },
+      "La foto pendiente se borra de la hoja."
+    );
+  }
+
+  function resetToCapture() {
+    setStep("capture");
+    setResult(null);
+    setPreview(null);
+    setPendingId(null);
   }
 
   async function save(value: ExpenseFormValue) {
     await api.post("/api/expenses", { ...value, source: "ticket" });
+    // Si venía de un pendiente, lo borramos ahora que ya se cargó el gasto.
+    if (pendingId) {
+      try {
+        await api.del(`/api/ticket/pending/${pendingId}`);
+      } catch {
+        // El gasto ya se guardó; si falla el borrado no bloqueamos al usuario.
+      }
+    }
     toast("Gasto guardado", "success");
     router.push("/");
     router.refresh();
@@ -84,14 +202,32 @@ export default function TicketPage() {
           )}
 
           <div className="grid grid-cols-1 gap-3">
-            <Button size="lg" onClick={() => fileRef.current?.click()}>
-              <Camera className="h-5 w-5" /> Sacar / subir foto
+            <Button size="lg" onClick={() => pick("scan")} disabled={quickSaving}>
+              <Camera className="h-5 w-5" /> Escanear y cargar ahora
+            </Button>
+            <Button
+              variant="secondary"
+              size="lg"
+              onClick={() => pick("quick")}
+              loading={quickSaving}
+            >
+              <Zap className="h-5 w-5 text-amber-500" />
+              {quickSaving ? "Guardando…" : "Modo rápido: guardar para después"}
             </Button>
             <p className="text-center text-xs text-slate-400">
               <ImageUp className="mr-1 inline h-3.5 w-3.5" />
-              También podés elegir una foto de tu galería.
+              El modo rápido solo saca la foto. La leés y confirmás cuando tengas tiempo.
             </p>
           </div>
+
+          {pending.length > 0 && (
+            <PendingList
+              pending={pending}
+              discardingId={discardingId}
+              onConfirm={confirmPending}
+              onDiscard={discardPending}
+            />
+          )}
         </div>
       )}
 
@@ -124,16 +260,87 @@ export default function TicketPage() {
             initial={ticketToExpense(result)}
             submitLabel="Guardar gasto"
             onSubmit={save}
-            onCancel={() => {
-              setStep("capture");
-              setResult(null);
-              setPreview(null);
-            }}
+            onCancel={resetToCapture}
           />
         </div>
       )}
+
+      <ConfirmDialog
+        open={confirmDialog.state.open}
+        title={confirmDialog.state.title}
+        message={confirmDialog.state.message}
+        confirmLabel="Descartar"
+        loading={discardingId != null}
+        onConfirm={() => confirmDialog.state.onConfirm?.()}
+        onCancel={confirmDialog.close}
+      />
     </div>
   );
+}
+
+function PendingList({
+  pending,
+  discardingId,
+  onConfirm,
+  onDiscard,
+}: {
+  pending: PendingTicket[];
+  discardingId: string | null;
+  onConfirm: (p: PendingTicket) => void;
+  onDiscard: (p: PendingTicket) => void;
+}) {
+  return (
+    <div className="animate-fade-up space-y-2">
+      <h2 className="flex items-center gap-1.5 px-1 text-sm font-semibold uppercase tracking-wide text-slate-400">
+        <Clock className="h-4 w-4" /> Pendientes por confirmar ({pending.length})
+      </h2>
+      <div className="space-y-2">
+        {pending.map((p) => (
+          <Card key={p.id} className="flex items-center gap-3 p-3">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={p.image}
+              alt="Ticket pendiente"
+              className="h-16 w-16 shrink-0 rounded-2xl object-cover ring-1 ring-slate-900/5"
+            />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-slate-700">Foto sin leer</p>
+              <p className="text-xs text-slate-400">{relativeTime(p.created_at)}</p>
+            </div>
+            <div className="flex shrink-0 items-center gap-1.5">
+              <Button size="sm" onClick={() => onConfirm(p)}>
+                <Sparkles className="h-4 w-4" /> Confirmar
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="px-2 text-slate-400 hover:text-rose-600"
+                loading={discardingId === p.id}
+                onClick={() => onDiscard(p)}
+                aria-label="Descartar"
+              >
+                {discardingId === p.id ? null : <Trash2 className="h-4 w-4" />}
+              </Button>
+            </div>
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** "hace 5 min", "hace 2 h", "ayer", o la fecha si es más viejo. */
+function relativeTime(iso: string): string {
+  const then = new Date(iso).getTime();
+  if (!Number.isFinite(then)) return "";
+  const diffMin = Math.round((Date.now() - then) / 60000);
+  if (diffMin < 1) return "recién";
+  if (diffMin < 60) return `hace ${diffMin} min`;
+  const diffH = Math.round(diffMin / 60);
+  if (diffH < 24) return `hace ${diffH} h`;
+  const diffD = Math.round(diffH / 24);
+  if (diffD === 1) return "ayer";
+  return `hace ${diffD} días`;
 }
 
 function DetectedCard({ result }: { result: TicketResult }) {

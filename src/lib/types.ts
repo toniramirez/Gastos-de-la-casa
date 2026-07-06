@@ -66,6 +66,18 @@ export interface Expense {
   updated_at: string;
 }
 
+/** Ticket sacado en "modo rápido": solo la foto guardada para confirmar
+ *  más tarde. No es un gasto todavía; al confirmarlo se crea el gasto y
+ *  este pendiente se borra. La imagen viaja como data URL (comprimida para
+ *  entrar en una celda de Google Sheets). */
+export interface PendingTicket {
+  id: string;
+  period_id: string;
+  note: string;
+  image: string; // data URL base64 (comprimida)
+  created_at: string;
+}
+
 /** préstamo: alguien le presta plata al otro.
  *  devolucion: alguien le devuelve plata al otro. */
 export type LoanType = "prestamo" | "devolucion";

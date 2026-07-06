@@ -5,6 +5,7 @@
 import type {
   Expense,
   Loan,
+  PendingTicket,
   Period,
   Settings,
   Settlement,
@@ -62,4 +63,14 @@ export interface Store {
 
   // --- Settlements (solo lectura por ahora) ---
   listSettlements(periodId?: string): Promise<Settlement[]>;
+
+  // --- Pending tickets (modo rápido: foto guardada para confirmar después) ---
+  listPendingTickets(): Promise<PendingTicket[]>;
+  getPendingTicket(id: string): Promise<PendingTicket | null>;
+  createPendingTicket(input: {
+    period_id: string;
+    note: string;
+    image: string;
+  }): Promise<PendingTicket>;
+  deletePendingTicket(id: string): Promise<boolean>;
 }

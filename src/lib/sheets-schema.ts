@@ -49,6 +49,7 @@ export const SHEETS = {
     "created_at",
   ],
   AuditLog: ["id", "date", "action", "entity", "entity_id", "details"],
+  PendingTickets: ["id", "period_id", "note", "image", "created_at"],
 } as const;
 
 export type SheetName = keyof typeof SHEETS;

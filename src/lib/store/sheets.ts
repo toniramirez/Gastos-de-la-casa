@@ -10,6 +10,7 @@ import type {
   ExpenseSource,
   Loan,
   LoanType,
+  PendingTicket,
   Period,
   PeriodStatus,
   Person,
@@ -88,6 +89,16 @@ function rowToLoan(r: Record<string, string>): Loan {
     notes: r.notes,
     created_at: r.created_at,
     updated_at: r.updated_at,
+  };
+}
+
+function rowToPendingTicket(r: Record<string, string>): PendingTicket {
+  return {
+    id: r.id,
+    period_id: r.period_id,
+    note: r.note || "",
+    image: r.image || "",
+    created_at: r.created_at,
   };
 }
 
@@ -293,6 +304,42 @@ export class SheetsStore implements Store {
       .map(rowToSettlement)
       .filter((s) => !periodId || s.period_id === periodId)
       .sort((a, b) => b.created_at.localeCompare(a.created_at));
+  }
+
+  async listPendingTickets(): Promise<PendingTicket[]> {
+    const rows = await readTable("PendingTickets");
+    return rows
+      .map(rowToPendingTicket)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at));
+  }
+
+  async getPendingTicket(id: string): Promise<PendingTicket | null> {
+    const rows = await readTable("PendingTickets");
+    const found = rows.find((r) => r.id === id);
+    return found ? rowToPendingTicket(found) : null;
+  }
+
+  async createPendingTicket(input: {
+    period_id: string;
+    note: string;
+    image: string;
+  }): Promise<PendingTicket> {
+    const p: PendingTicket = {
+      id: makeId("pnd"),
+      period_id: input.period_id,
+      note: input.note,
+      image: input.image,
+      created_at: nowISO(),
+    };
+    await appendRow("PendingTickets", p);
+    await this.audit("create", "pending_ticket", p.id, "");
+    return p;
+  }
+
+  async deletePendingTicket(id: string): Promise<boolean> {
+    const ok = await deleteRow("PendingTickets", "id", id);
+    if (ok) await this.audit("delete", "pending_ticket", id, "");
+    return ok;
   }
 
   private async audit(action: string, entity: string, entityId: string, details: string): Promise<void> {

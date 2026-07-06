@@ -6,7 +6,14 @@
 
 import { nowISO, todayISO } from "../format";
 import { makeId } from "../ids";
-import type { Expense, Loan, Period, Settings, Settlement } from "../types";
+import type {
+  Expense,
+  Loan,
+  PendingTicket,
+  Period,
+  Settings,
+  Settlement,
+} from "../types";
 import type { ExpenseInput, LoanInput } from "../validation";
 import { buildExpense, buildLoan } from "./build";
 import type {
@@ -22,6 +29,7 @@ interface MemoryDB {
   expenses: Expense[];
   loans: Loan[];
   settlements: Settlement[];
+  pendingTickets: PendingTicket[];
   seeded: boolean;
 }
 
@@ -36,6 +44,7 @@ function db(): MemoryDB {
       expenses: [],
       loans: [],
       settlements: [],
+      pendingTickets: [],
       seeded: false,
     };
   }
@@ -206,5 +215,38 @@ export class MemoryStore implements Store {
     return db()
       .settlements.filter((s) => !periodId || s.period_id === periodId)
       .sort((a, b) => b.created_at.localeCompare(a.created_at));
+  }
+
+  async listPendingTickets(): Promise<PendingTicket[]> {
+    return [...db().pendingTickets].sort((a, b) =>
+      b.created_at.localeCompare(a.created_at)
+    );
+  }
+
+  async getPendingTicket(id: string): Promise<PendingTicket | null> {
+    return db().pendingTickets.find((p) => p.id === id) ?? null;
+  }
+
+  async createPendingTicket(input: {
+    period_id: string;
+    note: string;
+    image: string;
+  }): Promise<PendingTicket> {
+    const p: PendingTicket = {
+      id: makeId("pnd"),
+      period_id: input.period_id,
+      note: input.note,
+      image: input.image,
+      created_at: nowISO(),
+    };
+    db().pendingTickets.push(p);
+    return { ...p };
+  }
+
+  async deletePendingTicket(id: string): Promise<boolean> {
+    const d = db();
+    const before = d.pendingTickets.length;
+    d.pendingTickets = d.pendingTickets.filter((p) => p.id !== id);
+    return d.pendingTickets.length < before;
   }
 }
