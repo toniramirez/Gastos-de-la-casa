@@ -11,6 +11,12 @@ export class ApiError extends Error {
   }
 }
 
+const PUBLIC_PAGES = ["/login", "/invitacion"];
+
+function isPublicPage(pathname: string): boolean {
+  return PUBLIC_PAGES.some((p) => pathname === p || pathname.startsWith(p + "/"));
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   let res: Response;
   try {
@@ -32,8 +38,9 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 
   const payload = json as { ok?: boolean; data?: T; error?: string } | null;
 
-  // Sesión vencida o cuenta eliminada: volvemos al login.
-  if (res.status === 401 && path !== "/api/login" && typeof window !== "undefined") {
+  // Sesión vencida o cuenta eliminada: volvemos al login. En las páginas
+  // públicas no, porque ahí un 401 es normal (y redirigir las recarga en loop).
+  if (res.status === 401 && typeof window !== "undefined" && !isPublicPage(window.location.pathname)) {
     window.location.href = "/login";
   }
 
