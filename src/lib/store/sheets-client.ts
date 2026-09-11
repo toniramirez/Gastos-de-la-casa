@@ -4,10 +4,11 @@
 // ==========================================================================
 
 import { google, type sheets_v4 } from "googleapis";
-import { SHEETS, type SheetName } from "../sheets-schema";
+import { SHEETS, SHEET_NAMES, type SheetName } from "../sheets-schema";
 
 let cachedSheets: sheets_v4.Sheets | null = null;
 let cachedSheetIds: Record<string, number> | null = null;
+let schemaReady: Promise<void> | null = null;
 
 export function sheetsConfigured(): boolean {
   return Boolean(
@@ -57,10 +58,64 @@ async function getSheetIds(): Promise<Record<string, number>> {
   return map;
 }
 
+/**
+ * Migración automática, una vez por proceso: crea las pestañas que falten
+ * (ej. Accounts / Invites) y completa los encabezados cuando el schema sumó
+ * columnas al final (ej. account_id). No toca encabezados que no coincidan
+ * con el schema: esos se dejan como están.
+ */
+function ensureSchema(): Promise<void> {
+  if (!schemaReady) {
+    schemaReady = migrateSchema().catch((err) => {
+      schemaReady = null; // reintentamos en el próximo pedido
+      throw err;
+    });
+  }
+  return schemaReady;
+}
+
+async function migrateSchema(): Promise<void> {
+  const sheets = getClient();
+  const spreadsheetId = getSpreadsheetId();
+  const existing = await getSheetIds();
+
+  const missing = SHEET_NAMES.filter((name) => existing[name] == null);
+  if (missing.length > 0) {
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId,
+      requestBody: {
+        requests: missing.map((title) => ({ addSheet: { properties: { title } } })),
+      },
+    });
+    cachedSheetIds = null;
+  }
+
+  const res = await sheets.spreadsheets.values.batchGet({
+    spreadsheetId,
+    ranges: SHEET_NAMES.map((name) => `${name}!1:1`),
+  });
+  const data: sheets_v4.Schema$ValueRange[] = [];
+  SHEET_NAMES.forEach((name, i) => {
+    const expected = SHEETS[name] as readonly string[];
+    const current = (res.data.valueRanges?.[i]?.values?.[0] ?? []).map(String);
+    const isPrefix = current.every((h, j) => h === expected[j]);
+    if (isPrefix && current.length < expected.length) {
+      data.push({ range: `${name}!A1`, values: [[...expected]] });
+    }
+  });
+  if (data.length > 0) {
+    await sheets.spreadsheets.values.batchUpdate({
+      spreadsheetId,
+      requestBody: { valueInputOption: "RAW", data },
+    });
+  }
+}
+
 /** Lee todas las filas de datos (sin el header) como objetos por columna. */
 export async function readTable(
   sheetName: SheetName
 ): Promise<Array<Record<string, string>>> {
+  await ensureSchema();
   const sheets = getClient();
   const headers = SHEETS[sheetName] as readonly string[];
   const res = await sheets.spreadsheets.values.get({
@@ -91,6 +146,7 @@ function toRow(sheetName: SheetName, obj: object): unknown[] {
 
 /** Agrega una fila al final de la pestaña. */
 export async function appendRow(sheetName: SheetName, obj: object): Promise<void> {
+  await ensureSchema();
   const sheets = getClient();
   await sheets.spreadsheets.values.append({
     spreadsheetId: getSpreadsheetId(),
@@ -132,6 +188,7 @@ export async function updateRow(
   keyVal: string,
   obj: object
 ): Promise<boolean> {
+  await ensureSchema();
   const rowNumber = await findRowNumber(sheetName, keyCol, keyVal);
   if (rowNumber == null) return false;
   const sheets = getClient();
@@ -150,6 +207,7 @@ export async function deleteRow(
   keyCol: string,
   keyVal: string
 ): Promise<boolean> {
+  await ensureSchema();
   const rowNumber = await findRowNumber(sheetName, keyCol, keyVal);
   if (rowNumber == null) return false;
   const sheets = getClient();
@@ -180,4 +238,5 @@ export async function deleteRow(
 export function resetSheetsCache(): void {
   cachedSheets = null;
   cachedSheetIds = null;
+  schemaReady = null;
 }

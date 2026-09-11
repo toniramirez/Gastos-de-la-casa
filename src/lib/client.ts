@@ -32,6 +32,11 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 
   const payload = json as { ok?: boolean; data?: T; error?: string } | null;
 
+  // Sesión vencida o cuenta eliminada: volvemos al login.
+  if (res.status === 401 && path !== "/api/login" && typeof window !== "undefined") {
+    window.location.href = "/login";
+  }
+
   if (!res.ok || !payload?.ok) {
     const message = payload?.error || `Error ${res.status}`;
     throw new ApiError(message, res.status);

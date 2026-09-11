@@ -1,5 +1,5 @@
 import { fail, handleError, ok, readJson } from "@/lib/api";
-import { getStore } from "@/lib/store";
+import { requireStore } from "@/lib/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,7 +11,7 @@ interface Body {
 
 export async function GET() {
   try {
-    const store = getStore();
+    const { store } = await requireStore();
     const pending = await store.listPendingTickets();
     return ok(pending);
   } catch (err) {
@@ -21,7 +21,7 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    const store = getStore();
+    const { store } = await requireStore();
     const body = await readJson<Body>(req);
     const image = body.image;
     if (!image || !image.startsWith("data:image/")) {

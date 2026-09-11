@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, Database, LogOut } from "lucide-react";
+import { CheckCircle2, Database, LogOut, UserCircle2 } from "lucide-react";
+import { AccountsCard } from "@/components/AccountsCard";
 import { PageHeader } from "@/components/PageHeader";
 import { useNames, useToast } from "@/components/Providers";
 import { api } from "@/lib/client";
-import type { SettingsResponse } from "@/lib/api-types";
+import type { MeResponse, SettingsResponse } from "@/lib/api-types";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Field, Input } from "@/components/ui/Field";
@@ -22,14 +23,19 @@ export default function ConfiguracionPage() {
   const [nameTony, setNameTony] = useState("");
   const [nameSol, setNameSol] = useState("");
   const [usingMemory, setUsingMemory] = useState(false);
+  const [me, setMe] = useState<MeResponse | null>(null);
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const res = await api.get<SettingsResponse>("/api/settings");
+      const [res, meRes] = await Promise.all([
+        api.get<SettingsResponse>("/api/settings"),
+        api.get<MeResponse>("/api/me"),
+      ]);
       setNameTony(res.settings.name_tony);
       setNameSol(res.settings.name_sol);
       setUsingMemory(Boolean(res.usingMemory));
+      setMe(meRes);
     } finally {
       setLoaded(true);
     }
@@ -66,6 +72,18 @@ export default function ConfiguracionPage() {
         <LoadingBlock />
       ) : (
         <div className="space-y-4">
+          {me && (
+            <Card className="flex animate-fade-up items-center gap-3">
+              <span className="flex h-9 w-9 items-center justify-center rounded-2xl bg-brand-100 text-brand-600">
+                <UserCircle2 className="h-5 w-5" />
+              </span>
+              <div className="text-sm">
+                <p className="text-slate-400">Estás usando la cuenta</p>
+                <p className="font-semibold text-slate-700">{me.name}</p>
+              </div>
+            </Card>
+          )}
+
           <Card className="animate-fade-up space-y-4">
             <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">Nombres</h2>
             <Field label="Persona A">
@@ -78,6 +96,8 @@ export default function ConfiguracionPage() {
               Guardar nombres
             </Button>
           </Card>
+
+          {me?.isMain && <AccountsCard />}
 
           <Card className="flex animate-fade-up items-start gap-3 delay-1">
             <span

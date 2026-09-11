@@ -33,12 +33,13 @@ interface MemoryDB {
   seeded: boolean;
 }
 
-// Persistimos entre recompilaciones de Next en dev.
-const g = globalThis as unknown as { __gastosMemoryDB?: MemoryDB };
+// Persistimos entre recompilaciones de Next en dev. Una "base" por cuenta.
+const g = globalThis as unknown as { __gastosMemoryDBs?: Record<string, MemoryDB> };
 
-function db(): MemoryDB {
-  if (!g.__gastosMemoryDB) {
-    g.__gastosMemoryDB = {
+function dbFor(accountId: string): MemoryDB {
+  const all = (g.__gastosMemoryDBs ??= {});
+  if (!all[accountId]) {
+    all[accountId] = {
       settings: { name_tony: "Tony", name_sol: "Sol" },
       periods: [],
       expenses: [],
@@ -48,7 +49,7 @@ function db(): MemoryDB {
       seeded: false,
     };
   }
-  return g.__gastosMemoryDB;
+  return all[accountId];
 }
 
 function matchesExpense(e: Expense, f?: ExpenseFilters): boolean {
@@ -74,22 +75,28 @@ function matchesLoan(l: Loan, f?: LoanFilters): boolean {
 }
 
 export class MemoryStore implements Store {
+  constructor(private readonly accountId: string) {}
+
+  private db(): MemoryDB {
+    return dbFor(this.accountId);
+  }
+
   async getSettings(): Promise<Settings> {
-    return { ...db().settings };
+    return { ...this.db().settings };
   }
 
   async updateSettings(patch: Partial<Settings>): Promise<Settings> {
-    const d = db();
+    const d = this.db();
     d.settings = { ...d.settings, ...patch };
     return { ...d.settings };
   }
 
   async listPeriods(): Promise<Period[]> {
-    return [...db().periods].sort((a, b) => b.created_at.localeCompare(a.created_at));
+    return [...this.db().periods].sort((a, b) => b.created_at.localeCompare(a.created_at));
   }
 
   async getOpenPeriod(): Promise<Period> {
-    const d = db();
+    const d = this.db();
     let open = d.periods.find((p) => p.status === "open");
     if (!open) {
       open = {
@@ -112,7 +119,7 @@ export class MemoryStore implements Store {
     notes: string;
     nextPeriodName?: string;
   }): Promise<CloseResult> {
-    const d = db();
+    const d = this.db();
     const open = await this.getOpenPeriod();
     const idx = d.periods.findIndex((p) => p.id === open.id);
     const today = todayISO();
@@ -148,23 +155,23 @@ export class MemoryStore implements Store {
   }
 
   async listExpenses(filters?: ExpenseFilters): Promise<Expense[]> {
-    return db()
+    return this.db()
       .expenses.filter((e) => matchesExpense(e, filters))
       .sort((a, b) => b.date.localeCompare(a.date) || b.created_at.localeCompare(a.created_at));
   }
 
   async getExpense(id: string): Promise<Expense | null> {
-    return db().expenses.find((e) => e.id === id) ?? null;
+    return this.db().expenses.find((e) => e.id === id) ?? null;
   }
 
   async createExpense(input: ExpenseInput & { period_id: string }): Promise<Expense> {
     const e = buildExpense(input);
-    db().expenses.push(e);
+    this.db().expenses.push(e);
     return { ...e };
   }
 
   async updateExpense(id: string, input: ExpenseInput): Promise<Expense | null> {
-    const d = db();
+    const d = this.db();
     const idx = d.expenses.findIndex((e) => e.id === id);
     if (idx === -1) return null;
     const updated = buildExpense({ ...input, period_id: d.expenses[idx].period_id }, d.expenses[idx]);
@@ -173,30 +180,30 @@ export class MemoryStore implements Store {
   }
 
   async deleteExpense(id: string): Promise<boolean> {
-    const d = db();
+    const d = this.db();
     const before = d.expenses.length;
     d.expenses = d.expenses.filter((e) => e.id !== id);
     return d.expenses.length < before;
   }
 
   async listLoans(filters?: LoanFilters): Promise<Loan[]> {
-    return db()
+    return this.db()
       .loans.filter((l) => matchesLoan(l, filters))
       .sort((a, b) => b.date.localeCompare(a.date) || b.created_at.localeCompare(a.created_at));
   }
 
   async getLoan(id: string): Promise<Loan | null> {
-    return db().loans.find((l) => l.id === id) ?? null;
+    return this.db().loans.find((l) => l.id === id) ?? null;
   }
 
   async createLoan(input: LoanInput & { period_id: string }): Promise<Loan> {
     const l = buildLoan(input);
-    db().loans.push(l);
+    this.db().loans.push(l);
     return { ...l };
   }
 
   async updateLoan(id: string, input: LoanInput): Promise<Loan | null> {
-    const d = db();
+    const d = this.db();
     const idx = d.loans.findIndex((l) => l.id === id);
     if (idx === -1) return null;
     const updated = buildLoan({ ...input, period_id: d.loans[idx].period_id }, d.loans[idx]);
@@ -205,26 +212,26 @@ export class MemoryStore implements Store {
   }
 
   async deleteLoan(id: string): Promise<boolean> {
-    const d = db();
+    const d = this.db();
     const before = d.loans.length;
     d.loans = d.loans.filter((l) => l.id !== id);
     return d.loans.length < before;
   }
 
   async listSettlements(periodId?: string): Promise<Settlement[]> {
-    return db()
+    return this.db()
       .settlements.filter((s) => !periodId || s.period_id === periodId)
       .sort((a, b) => b.created_at.localeCompare(a.created_at));
   }
 
   async listPendingTickets(): Promise<PendingTicket[]> {
-    return [...db().pendingTickets].sort((a, b) =>
+    return [...this.db().pendingTickets].sort((a, b) =>
       b.created_at.localeCompare(a.created_at)
     );
   }
 
   async getPendingTicket(id: string): Promise<PendingTicket | null> {
-    return db().pendingTickets.find((p) => p.id === id) ?? null;
+    return this.db().pendingTickets.find((p) => p.id === id) ?? null;
   }
 
   async createPendingTicket(input: {
@@ -239,12 +246,12 @@ export class MemoryStore implements Store {
       image: input.image,
       created_at: nowISO(),
     };
-    db().pendingTickets.push(p);
+    this.db().pendingTickets.push(p);
     return { ...p };
   }
 
   async deletePendingTicket(id: string): Promise<boolean> {
-    const d = db();
+    const d = this.db();
     const before = d.pendingTickets.length;
     d.pendingTickets = d.pendingTickets.filter((p) => p.id !== id);
     return d.pendingTickets.length < before;

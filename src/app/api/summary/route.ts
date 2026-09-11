@@ -1,13 +1,14 @@
 import { computeSummary, settlementDirection } from "@/lib/balance";
 import { handleError, ok } from "@/lib/api";
-import { getStore, isUsingMemoryStore } from "@/lib/store";
+import { isUsingMemoryStore } from "@/lib/store";
+import { requireStore } from "@/lib/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const store = getStore();
+    const { store } = await requireStore();
     const [settings, period] = await Promise.all([store.getSettings(), store.getOpenPeriod()]);
     // Gastos: solo del período actual. Préstamos: TODOS (la deuda se arrastra
     // entre períodos y no se salda al cerrar).

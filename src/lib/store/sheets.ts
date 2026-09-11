@@ -2,6 +2,7 @@
 // Implementación del Store sobre Google Sheets.
 // ==========================================================================
 
+import { MAIN_ACCOUNT_ID } from "../auth";
 import { nowISO, todayISO } from "../format";
 import { makeId } from "../ids";
 import type {
@@ -27,6 +28,7 @@ import {
   readTable,
   updateRow,
 } from "./sheets-client";
+import type { SheetName } from "../sheets-schema";
 import type {
   CloseResult,
   ExpenseFilters,
@@ -141,20 +143,51 @@ function matchesLoan(l: Loan, f?: LoanFilters): boolean {
   return true;
 }
 
+/** Cuenta dueña de una fila. Vacío = principal (filas de antes de las cuentas). */
+function rowAccount(r: Record<string, string>): string {
+  return r.account_id || MAIN_ACCOUNT_ID;
+}
+
+/** Cada instancia ve y escribe solo los datos de una cuenta. */
 export class SheetsStore implements Store {
+  constructor(private readonly accountId: string) {}
+
+  /** Filas de la pestaña que pertenecen a esta cuenta. */
+  private async readOwn(sheetName: SheetName): Promise<Array<Record<string, string>>> {
+    const rows = await readTable(sheetName);
+    return rows.filter((r) => rowAccount(r) === this.accountId);
+  }
+
+  private append(sheetName: SheetName, obj: object): Promise<void> {
+    return appendRow(sheetName, { ...obj, account_id: this.accountId });
+  }
+
+  /** Reemplaza la fila completa: siempre reescribimos el account_id para no
+   *  "mover" la fila a otra cuenta por dejarlo vacío. */
+  private update(sheetName: SheetName, id: string, obj: object): Promise<boolean> {
+    return updateRow(sheetName, "id", id, { ...obj, account_id: this.accountId });
+  }
+
+  /** Clave en la pestaña Settings. La principal usa las claves de siempre;
+   *  las invitadas llevan prefijo "<accountId>:". */
+  private settingsKey(key: string): string {
+    return this.accountId === MAIN_ACCOUNT_ID ? key : `${this.accountId}:${key}`;
+  }
+
   async getSettings(): Promise<Settings> {
     const rows = await readTable("Settings");
     const map: Record<string, string> = {};
     for (const r of rows) map[r.key] = r.value;
     return {
-      name_tony: map.name_tony || "Tony",
-      name_sol: map.name_sol || "Sol",
+      name_tony: map[this.settingsKey("name_tony")] || "Tony",
+      name_sol: map[this.settingsKey("name_sol")] || "Sol",
     };
   }
 
   async updateSettings(patch: Partial<Settings>): Promise<Settings> {
-    for (const [key, value] of Object.entries(patch)) {
+    for (const [rawKey, value] of Object.entries(patch)) {
       if (value == null) continue;
+      const key = this.settingsKey(rawKey);
       const existed = await updateRow("Settings", "key", key, { key, value });
       if (!existed) await appendRow("Settings", { key, value });
     }
@@ -162,12 +195,12 @@ export class SheetsStore implements Store {
   }
 
   async listPeriods(): Promise<Period[]> {
-    const rows = await readTable("Periods");
+    const rows = await this.readOwn("Periods");
     return rows.map(rowToPeriod).sort((a, b) => b.created_at.localeCompare(a.created_at));
   }
 
   async getOpenPeriod(): Promise<Period> {
-    const periods = await readTable("Periods");
+    const periods = await this.readOwn("Periods");
     const openRow = periods.find((p) => (p.status || "open") === "open");
     if (openRow) return rowToPeriod(openRow);
 
@@ -179,7 +212,7 @@ export class SheetsStore implements Store {
       status: "open",
       created_at: nowISO(),
     };
-    await appendRow("Periods", period);
+    await this.append("Periods", period);
     return period;
   }
 
@@ -194,7 +227,7 @@ export class SheetsStore implements Store {
     const today = todayISO();
 
     const closedPeriod: Period = { ...open, status: "closed", end_date: today };
-    await updateRow("Periods", "id", open.id, closedPeriod);
+    await this.update("Periods", open.id, closedPeriod);
 
     let settlement: Settlement | null = null;
     if (input.from && input.to && input.amount > 0) {
@@ -208,26 +241,26 @@ export class SheetsStore implements Store {
         notes: input.notes,
         created_at: nowISO(),
       };
-      await appendRow("Settlements", settlement);
+      await this.append("Settlements", settlement);
     }
 
-    const allPeriods = await readTable("Periods");
+    const ownPeriods = await this.readOwn("Periods");
     const newPeriod: Period = {
       id: makeId("per"),
-      name: input.nextPeriodName?.trim() || `Período ${allPeriods.length + 1}`,
+      name: input.nextPeriodName?.trim() || `Período ${ownPeriods.length + 1}`,
       start_date: today,
       end_date: null,
       status: "open",
       created_at: nowISO(),
     };
-    await appendRow("Periods", newPeriod);
+    await this.append("Periods", newPeriod);
 
     await this.audit("close_period", "period", open.id, `settlement=${settlement?.amount ?? 0}`);
     return { closedPeriod, newPeriod, settlement };
   }
 
   async listExpenses(filters?: ExpenseFilters): Promise<Expense[]> {
-    const rows = await readTable("Expenses");
+    const rows = await this.readOwn("Expenses");
     return rows
       .map(rowToExpense)
       .filter((e) => matchesExpense(e, filters))
@@ -235,14 +268,14 @@ export class SheetsStore implements Store {
   }
 
   async getExpense(id: string): Promise<Expense | null> {
-    const rows = await readTable("Expenses");
+    const rows = await this.readOwn("Expenses");
     const found = rows.find((r) => r.id === id);
     return found ? rowToExpense(found) : null;
   }
 
   async createExpense(input: ExpenseInput & { period_id: string }): Promise<Expense> {
     const e = buildExpense(input);
-    await appendRow("Expenses", e);
+    await this.append("Expenses", e);
     await this.audit("create", "expense", e.id, `${e.total}`);
     return e;
   }
@@ -251,20 +284,21 @@ export class SheetsStore implements Store {
     const existing = await this.getExpense(id);
     if (!existing) return null;
     const updated = buildExpense({ ...input, period_id: existing.period_id }, existing);
-    const ok = await updateRow("Expenses", "id", id, updated);
+    const ok = await this.update("Expenses", id, updated);
     if (!ok) return null;
     await this.audit("update", "expense", id, `${updated.total}`);
     return updated;
   }
 
   async deleteExpense(id: string): Promise<boolean> {
+    if (!(await this.getExpense(id))) return false;
     const ok = await deleteRow("Expenses", "id", id);
     if (ok) await this.audit("delete", "expense", id, "");
     return ok;
   }
 
   async listLoans(filters?: LoanFilters): Promise<Loan[]> {
-    const rows = await readTable("Loans");
+    const rows = await this.readOwn("Loans");
     return rows
       .map(rowToLoan)
       .filter((l) => matchesLoan(l, filters))
@@ -272,14 +306,14 @@ export class SheetsStore implements Store {
   }
 
   async getLoan(id: string): Promise<Loan | null> {
-    const rows = await readTable("Loans");
+    const rows = await this.readOwn("Loans");
     const found = rows.find((r) => r.id === id);
     return found ? rowToLoan(found) : null;
   }
 
   async createLoan(input: LoanInput & { period_id: string }): Promise<Loan> {
     const l = buildLoan(input);
-    await appendRow("Loans", l);
+    await this.append("Loans", l);
     await this.audit("create", "loan", l.id, `${l.amount}`);
     return l;
   }
@@ -288,20 +322,21 @@ export class SheetsStore implements Store {
     const existing = await this.getLoan(id);
     if (!existing) return null;
     const updated = buildLoan({ ...input, period_id: existing.period_id }, existing);
-    const ok = await updateRow("Loans", "id", id, updated);
+    const ok = await this.update("Loans", id, updated);
     if (!ok) return null;
     await this.audit("update", "loan", id, `${updated.amount}`);
     return updated;
   }
 
   async deleteLoan(id: string): Promise<boolean> {
+    if (!(await this.getLoan(id))) return false;
     const ok = await deleteRow("Loans", "id", id);
     if (ok) await this.audit("delete", "loan", id, "");
     return ok;
   }
 
   async listSettlements(periodId?: string): Promise<Settlement[]> {
-    const rows = await readTable("Settlements");
+    const rows = await this.readOwn("Settlements");
     return rows
       .map(rowToSettlement)
       .filter((s) => !periodId || s.period_id === periodId)
@@ -309,14 +344,14 @@ export class SheetsStore implements Store {
   }
 
   async listPendingTickets(): Promise<PendingTicket[]> {
-    const rows = await readTable("PendingTickets");
+    const rows = await this.readOwn("PendingTickets");
     return rows
       .map(rowToPendingTicket)
       .sort((a, b) => b.created_at.localeCompare(a.created_at));
   }
 
   async getPendingTicket(id: string): Promise<PendingTicket | null> {
-    const rows = await readTable("PendingTickets");
+    const rows = await this.readOwn("PendingTickets");
     const found = rows.find((r) => r.id === id);
     return found ? rowToPendingTicket(found) : null;
   }
@@ -333,12 +368,13 @@ export class SheetsStore implements Store {
       image: input.image,
       created_at: nowISO(),
     };
-    await appendRow("PendingTickets", p);
+    await this.append("PendingTickets", p);
     await this.audit("create", "pending_ticket", p.id, "");
     return p;
   }
 
   async deletePendingTicket(id: string): Promise<boolean> {
+    if (!(await this.getPendingTicket(id))) return false;
     const ok = await deleteRow("PendingTickets", "id", id);
     if (ok) await this.audit("delete", "pending_ticket", id, "");
     return ok;
@@ -346,7 +382,7 @@ export class SheetsStore implements Store {
 
   private async audit(action: string, entity: string, entityId: string, details: string): Promise<void> {
     try {
-      await appendRow("AuditLog", {
+      await this.append("AuditLog", {
         id: makeId("log"),
         date: nowISO(),
         action,

@@ -85,7 +85,18 @@ export const closePeriodSchema = z.object({
 });
 
 export const loginSchema = z.object({
-  pin: z.string().min(1, "Ingresá el PIN"),
+  // Se llama "pin" por compatibilidad: es el PIN de la principal o la
+  // contraseña de una cuenta invitada.
+  pin: z.string().min(1, "Ingresá la contraseña"),
+});
+
+export const registerSchema = z.object({
+  token: z.string().min(1, "Falta la invitación"),
+  name: z.string().trim().min(1, "Poné un nombre").max(30, "El nombre es muy largo"),
+  password: z
+    .string()
+    .min(4, "La contraseña tiene que tener al menos 4 caracteres")
+    .max(100, "La contraseña es muy larga"),
 });
 
 // Esquema con el que validamos lo que devuelve OpenAI al leer un ticket.

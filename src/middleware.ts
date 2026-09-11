@@ -1,13 +1,13 @@
 // ==========================================================================
-// Protege todas las rutas excepto el login. Verifica la cookie de sesión.
-// Corre en el edge runtime (jose es compatible).
+// Protege todas las rutas excepto el login y el registro por invitación.
+// Verifica la cookie de sesión. Corre en el edge runtime (jose es compatible).
 // ==========================================================================
 
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
 
 // Rutas públicas (no requieren sesión).
-const PUBLIC_PATHS = ["/login", "/api/login"];
+const PUBLIC_PATHS = ["/login", "/api/login", "/invitacion", "/api/register"];
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
@@ -16,8 +16,8 @@ export async function middleware(req: NextRequest) {
   if (isPublic) return NextResponse.next();
 
   const token = req.cookies.get(SESSION_COOKIE)?.value;
-  const valid = await verifySessionToken(token);
-  if (valid) return NextResponse.next();
+  const accountId = await verifySessionToken(token);
+  if (accountId) return NextResponse.next();
 
   // API => 401 JSON. Páginas => redirect al login.
   if (pathname.startsWith("/api/")) {

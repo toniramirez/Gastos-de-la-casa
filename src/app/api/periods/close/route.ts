@@ -1,6 +1,6 @@
 import { computeSummary, settlementDirection } from "@/lib/balance";
 import { handleError, ok, readJson } from "@/lib/api";
-import { getStore } from "@/lib/store";
+import { requireStore } from "@/lib/session";
 import { closePeriodSchema } from "@/lib/validation";
 
 export const runtime = "nodejs";
@@ -18,7 +18,7 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(req: Request) {
   try {
-    const store = getStore();
+    const { store } = await requireStore();
     const body = await readJson(req);
     const { notes, next_period_name } = closePeriodSchema.parse(body);
 

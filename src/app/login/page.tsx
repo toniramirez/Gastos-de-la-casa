@@ -39,7 +39,7 @@ export default function LoginPage() {
             <Home className="h-9 w-9" />
           </div>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900">Gastos de la casa</h1>
-          <p className="mt-1 text-sm text-slate-400">Ingresá el PIN para entrar</p>
+          <p className="mt-1 text-sm text-slate-400">Ingresá tu contraseña para entrar</p>
         </div>
 
         <form onSubmit={submit} className="animate-fade-up space-y-4 delay-1">
@@ -48,11 +48,12 @@ export default function LoginPage() {
             <input
               autoFocus
               type="password"
-              inputMode="numeric"
+              autoComplete="current-password"
+              aria-label="Contraseña"
               value={pin}
               onChange={(e) => setPin(e.target.value)}
               placeholder="••••"
-              className="w-full rounded-2xl border border-slate-200 bg-white/80 py-4 pl-12 pr-4 text-center text-2xl tracking-[0.5em] text-slate-900 backdrop-blur-sm transition-all duration-200 focus:border-brand-500 focus:bg-white focus:outline-none focus:ring-4 focus:ring-brand-500/15"
+              className="w-full rounded-2xl border border-slate-200 bg-white/80 py-4 pl-12 pr-4 text-center text-2xl tracking-[0.3em] text-slate-900 backdrop-blur-sm transition-all duration-200 focus:border-brand-500 focus:bg-white focus:outline-none focus:ring-4 focus:ring-brand-500/15"
             />
           </div>
 

@@ -135,6 +135,28 @@ export interface Settings {
   name_sol: string;
 }
 
+// --- Cuentas -----------------------------------------------------------------
+
+/** Cuenta invitada. Tiene sus propios gastos, préstamos, períodos y nombres.
+ *  La cuenta principal no se guarda acá: entra con APP_PIN. */
+export interface Account {
+  id: string;
+  name: string;
+  password_hash: string;
+  invite_id: string;
+  created_at: string;
+}
+
+/** Link de invitación generado desde la cuenta principal. El id es el token
+ *  del link. Sirve una sola vez y vence. */
+export interface Invite {
+  id: string;
+  created_at: string;
+  expires_at: string;
+  used_at: string; // vacío si todavía no se usó
+  account_id: string; // cuenta creada con esta invitación
+}
+
 // --- Resultado del cálculo de balance ---------------------------------------
 
 /** Signo de la deuda. `balance` está expresado como "cuánto le debe Sol a Tony".

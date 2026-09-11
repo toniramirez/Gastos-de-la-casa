@@ -13,8 +13,20 @@ export function fail(message: string, status = 400, extra?: unknown): NextRespon
   return NextResponse.json({ ok: false, error: message, details: extra }, { status });
 }
 
+/** Error con status HTTP y mensaje apto para mostrar al usuario. */
+export class HttpError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
 /** Convierte errores conocidos en respuestas JSON legibles para el usuario. */
 export function handleError(err: unknown): NextResponse {
+  if (err instanceof HttpError) {
+    return fail(err.message, err.status);
+  }
   if (err instanceof ZodError) {
     const first = err.errors[0];
     return fail(first?.message ?? "Datos inválidos", 400, err.flatten());

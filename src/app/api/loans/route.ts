@@ -1,5 +1,5 @@
 import { handleError, ok, readJson } from "@/lib/api";
-import { getStore } from "@/lib/store";
+import { requireStore } from "@/lib/session";
 import { loanInputSchema } from "@/lib/validation";
 
 export const runtime = "nodejs";
@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
   try {
-    const store = getStore();
+    const { store } = await requireStore();
     const { searchParams } = new URL(req.url);
     let periodId = searchParams.get("periodId") ?? undefined;
     if (!periodId || periodId === "current") {
@@ -28,7 +28,7 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
-    const store = getStore();
+    const { store } = await requireStore();
     const body = await readJson(req);
     const input = loanInputSchema.parse(body);
     const period = await store.getOpenPeriod();

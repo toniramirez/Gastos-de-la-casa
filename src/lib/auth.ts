@@ -1,5 +1,7 @@
 // ==========================================================================
-// Autenticación simple con PIN. Sesión firmada guardada en cookie httpOnly.
+// Autenticación simple. Sesión firmada guardada en cookie httpOnly.
+// La cuenta principal entra con el PIN (APP_PIN); las cuentas invitadas con
+// su propia contraseña. El token lleva el id de la cuenta.
 // Compatible con el edge runtime (usa jose).
 // ==========================================================================
 
@@ -7,6 +9,10 @@ import { SignJWT, jwtVerify } from "jose";
 
 export const SESSION_COOKIE = "gastos_session";
 const SESSION_DURATION_SECONDS = 60 * 60 * 24 * 30; // 30 días
+
+/** Id de la cuenta principal (la que existía antes de las invitaciones). Las
+ *  filas viejas de la hoja, sin account_id, pertenecen a esta cuenta. */
+export const MAIN_ACCOUNT_ID = "main";
 
 function getSecret(): Uint8Array {
   const secret =
@@ -32,23 +38,25 @@ export function checkPin(pin: string): boolean {
   return diff === 0;
 }
 
-/** Crea un token de sesión firmado. */
-export async function createSessionToken(): Promise<string> {
-  return new SignJWT({ ok: true })
+/** Crea un token de sesión firmado para una cuenta. */
+export async function createSessionToken(accountId: string): Promise<string> {
+  return new SignJWT({ ok: true, acc: accountId })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime(`${SESSION_DURATION_SECONDS}s`)
     .sign(getSecret());
 }
 
-/** Verifica un token de sesión. Devuelve true si es válido. */
-export async function verifySessionToken(token: string | undefined): Promise<boolean> {
-  if (!token) return false;
+/** Verifica un token de sesión. Devuelve el id de la cuenta o null si no es
+ *  válido. Los tokens viejos (sin `acc`) son de la cuenta principal, así las
+ *  sesiones abiertas antes de este cambio siguen funcionando. */
+export async function verifySessionToken(token: string | undefined): Promise<string | null> {
+  if (!token) return null;
   try {
-    await jwtVerify(token, getSecret());
-    return true;
+    const { payload } = await jwtVerify(token, getSecret());
+    return typeof payload.acc === "string" && payload.acc ? payload.acc : MAIN_ACCOUNT_ID;
   } catch {
-    return false;
+    return null;
   }
 }
 

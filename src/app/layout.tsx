@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { Providers } from "@/components/Providers";
+import { getSession } from "@/lib/session";
 import { getStore } from "@/lib/store";
 
 export const metadata: Metadata = {
@@ -19,7 +20,9 @@ export const viewport: Viewport = {
 
 async function readInitialNames(): Promise<{ tony: string; sol: string }> {
   try {
-    const settings = await getStore().getSettings();
+    const session = await getSession();
+    if (!session) return { tony: "Tony", sol: "Sol" };
+    const settings = await getStore(session.accountId).getSettings();
     return { tony: settings.name_tony, sol: settings.name_sol };
   } catch {
     return { tony: "Tony", sol: "Sol" };
