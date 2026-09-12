@@ -9,6 +9,7 @@ import type {
   Period,
   Settings,
   Settlement,
+  Transfer,
 } from "../types";
 import type { ExpenseInput, LoanInput } from "../validation";
 
@@ -27,7 +28,9 @@ export interface LoanFilters {
 export interface CloseResult {
   closedPeriod: Period;
   newPeriod: Period;
-  settlement: Settlement | null;
+  /** Un Settlement por transferencia: con más de dos personas puede haber
+   *  varios pagos para saldar el período. */
+  settlements: Settlement[];
 }
 
 export interface Store {
@@ -40,9 +43,8 @@ export interface Store {
   /** Devuelve el período abierto; si no hay ninguno, crea uno. */
   getOpenPeriod(): Promise<Period>;
   closePeriod(input: {
-    from: "tony" | "sol" | null;
-    to: "tony" | "sol" | null;
-    amount: number;
+    /** Pagos con los que se salda el período (puede venir vacío). */
+    transfers: Transfer[];
     notes: string;
     nextPeriodName?: string;
   }): Promise<CloseResult>;

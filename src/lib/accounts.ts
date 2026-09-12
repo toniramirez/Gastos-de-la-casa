@@ -9,6 +9,7 @@ import { HttpError } from "./api";
 import { nowISO } from "./format";
 import { makeId } from "./ids";
 import { hashPassword, verifyPassword } from "./passwords";
+import { defaultPeople } from "./people";
 import { getAccountStore, getStore } from "./store";
 import type { Account, Invite } from "./types";
 
@@ -120,8 +121,11 @@ export async function registerWithInvite(input: {
   await store.updateInvite({ ...invite!, used_at: nowISO(), account_id: account.id });
   invalidateAccountsCache();
 
-  // Nombres iniciales de la cuenta nueva (se pueden cambiar en Configuración).
-  await getStore(account.id).updateSettings({ name_tony: input.name, name_sol: "Persona 2" });
+  // Personas iniciales de la cuenta nueva (se editan en Configuración: ahí se
+  // pueden renombrar y agregar las que hagan falta).
+  await getStore(account.id).updateSettings({
+    people: defaultPeople(input.name, "Persona 2"),
+  });
   return account.id;
 }
 

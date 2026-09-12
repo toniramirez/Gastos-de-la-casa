@@ -1,6 +1,6 @@
 # 🏠 Gastos de la casa
 
-App web mobile-first para llevar los gastos compartidos de la casa entre dos personas (por defecto **Tony** y **Sol**, editables). Registra gastos, préstamos y devoluciones, calcula quién le debe a quién y permite **cerrar períodos** para dejar la cuenta en cero y empezar de nuevo.
+App web mobile-first para llevar los gastos compartidos de la casa entre **las personas que quieras** (arranca con dos, y en Configuración se agregan, renombran o se sacan). Registra gastos, préstamos y devoluciones, calcula quién le debe a quién y permite **cerrar períodos** para dejar la cuenta en cero y empezar de nuevo.
 
 - **Next.js (App Router) + TypeScript + Tailwind CSS**
 - **Base de datos: Google Sheets** (con service account, todo server-side)
@@ -12,16 +12,27 @@ App web mobile-first para llevar los gastos compartidos de la casa entre dos per
 
 ---
 
+## 👥 Las personas de la casa
+
+La lista de personas se edita en **Configuración → Personas**: se agregan, se renombran y se les cambia el color de acento (hasta 10). Los gastos se dividen siempre entre las **personas activas**.
+
+Sacar a alguien no borra nada: queda **desactivada**, deja de aparecer en los formularios, sus gastos viejos siguen contando en los períodos donde estaban y se puede reactivar. Siempre tienen que quedar al menos dos activas.
+
+La lista vive en la pestaña `Settings`, en la clave `people` (JSON).
+
+---
+
 ## 🧠 Cómo funciona el balance
 
-Todo se mide como **"cuánto le debe Sol a Tony"**:
+Cada persona tiene un **neto**: positivo = puso más de lo que le tocaba (le deben), negativo = puso menos (debe). La suma de todos los netos es cero.
 
-- **Gasto pagado por Tony, dividido 50/50** → Sol le debe a Tony la mitad.
-- **Gasto pagado por Sol** → Tony le debe a Sol su parte.
+- **Gasto pagado por Tony, dividido en partes iguales** → Tony queda a favor por la parte de los demás.
 - **Tony le presta $20.000 a Sol** → Sol le debe $20.000 más a Tony.
 - **Sol le devuelve $10.000 a Tony** → esa deuda baja $10.000.
 
-Al **cerrar un período** la app calcula el neto y te dice: *"Para dejar la cuenta en cero, X le tiene que pagar $Y a Z"*. Guarda el cierre, marca el período como cerrado y crea uno nuevo abierto.
+Con esos netos la app arma los **pagos mínimos** para volver a cero (a lo sumo uno menos que la cantidad de personas): cruza al que más debe con el que más le deben. Con dos personas es un solo pago; con tres, dos.
+
+Al **cerrar un período** te muestra esos pagos (*"Sol → Tony $8.200; Juli → Tony $4.200"*), guarda un cierre por cada uno, marca el período como cerrado y crea uno nuevo abierto.
 
 La lógica vive en [`src/lib/balance.ts`](src/lib/balance.ts) y está cubierta por tests ([`src/lib/balance.test.ts`](src/lib/balance.test.ts)).
 
@@ -117,6 +128,7 @@ Si preferís crearlas a mano, estas son las pestañas (nombres exactos) y sus co
 ```
 key | value
 ```
+> Acá va la lista de personas, en la clave `people` (JSON con id, nombre, color y si está activa).
 
 **`Periods`**
 ```
@@ -125,7 +137,7 @@ id | name | start_date | end_date | status | created_at | account_id
 
 **`Expenses`**
 ```
-id | period_id | date | description | merchant | category | group | total | paid_by | split_type | share_tony | share_sol | created_by | source | notes | ticket_image_url | created_at | updated_at | account_id
+id | period_id | date | description | merchant | category | group | total | paid_by | split_type | share_tony | share_sol | created_by | source | notes | ticket_image_url | created_at | updated_at | account_id | shares
 ```
 
 **`Loans`**
@@ -158,7 +170,9 @@ id | name | password_hash | invite_id | created_at
 id | created_at | expires_at | used_at | account_id
 ```
 
-> `account_id` vacío = **cuenta principal** (así los datos de antes de las cuentas siguen siendo de la principal sin migrar nada). Los nombres de las cuentas invitadas se guardan en `Settings` con la clave `<account_id>:name_tony` / `<account_id>:name_sol`.
+> `account_id` vacío = **cuenta principal** (así los datos de antes de las cuentas siguen siendo de la principal sin migrar nada). Las personas de las cuentas invitadas se guardan en `Settings` con la clave `<account_id>:people`.
+
+> En `Expenses`, la parte de cada persona vive en **`shares`** (JSON, ej. `{"tony":5000,"sol":5000}`). Las columnas `share_tony` / `share_sol` quedaron de cuando la app era de dos personas fijas: se siguen llenando para poder leer la hoja de un vistazo, y las filas viejas que solo las tienen se leen igual. Las columnas nuevas van **siempre al final**, así la migración automática las agrega sola.
 >
 > La app crea sola las pestañas y columnas que falten la primera vez que se conecta (no hace falta volver a correr `init-sheets`, aunque también sirve).
 
@@ -230,6 +244,7 @@ src/
   components/           ← componentes reutilizables (formularios, UI, nav)
   lib/
     balance.ts          ← lógica central de balance (testeada)
+    people.ts           ← personas: paleta de colores, defaults, serialización
     store/              ← acceso a datos: Google Sheets + fallback en memoria
     openai.ts           ← lectura de tickets
     auth.ts             ← sesión con PIN

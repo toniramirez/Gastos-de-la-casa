@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Pencil, Search, Trash2 } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
-import { useNames, useToast } from "@/components/Providers";
+import { usePeople, useToast } from "@/components/Providers";
 import { api } from "@/lib/client";
 import { formatDate, formatMoney } from "@/lib/format";
 import { CATEGORIES, type Expense, type Loan, type Period } from "@/lib/types";
@@ -17,7 +17,7 @@ type Tab = "gastos" | "prestamos";
 
 export default function HistorialPage() {
   const router = useRouter();
-  const { names } = useNames();
+  const { active } = usePeople();
   const { toast } = useToast();
   const confirm = useConfirm();
 
@@ -168,8 +168,11 @@ export default function HistorialPage() {
               className="w-auto min-w-[7rem] py-2 text-sm"
             >
               <option value="">Pagó cualquiera</option>
-              <option value="tony">Pagó {names.tony}</option>
-              <option value="sol">Pagó {names.sol}</option>
+              {active.map((p) => (
+                <option key={p.id} value={p.id}>
+                  Pagó {p.name}
+                </option>
+              ))}
             </Select>
           </>
         )}
@@ -241,7 +244,7 @@ function ExpenseRow({
   onEdit: () => void;
   onDelete: () => void;
 }) {
-  const { names } = useNames();
+  const { nameOf, colorFor } = usePeople();
   return (
     <li
       className="flex animate-fade-up items-center gap-3 rounded-3xl bg-white/90 p-3.5 shadow-card ring-1 ring-slate-900/5 backdrop-blur-sm transition-shadow hover:shadow-soft"
@@ -258,9 +261,7 @@ function ExpenseRow({
           <span>·</span>
           <span>{e.category}</span>
           <span>·</span>
-          <span className={e.paid_by === "tony" ? "text-tony" : "text-sol"}>
-            pagó {names[e.paid_by]}
-          </span>
+          <span style={{ color: colorFor(e.paid_by).deep }}>pagó {nameOf(e.paid_by)}</span>
         </div>
       </div>
       <span className="shrink-0 font-bold text-slate-900">{formatMoney(e.total)}</span>
@@ -280,7 +281,7 @@ function LoanRow({
   onEdit: () => void;
   onDelete: () => void;
 }) {
-  const { names } = useNames();
+  const { nameOf } = usePeople();
   const verb = l.type === "prestamo" ? "prestó a" : "devolvió a";
   return (
     <li
@@ -289,7 +290,7 @@ function LoanRow({
     >
       <div className="min-w-0 flex-1 cursor-pointer" onClick={onEdit} role="button">
         <span className="truncate font-semibold text-slate-800">
-          {names[l.from_person]} {verb} {names[l.to_person]}
+          {nameOf(l.from_person)} {verb} {nameOf(l.to_person)}
         </span>
         <div className="mt-0.5 flex items-center gap-2 text-xs text-slate-400">
           <span>{formatDate(l.date)}</span>

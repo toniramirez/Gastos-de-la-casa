@@ -2,11 +2,21 @@
 // Tipos centrales del dominio.
 // ==========================================================================
 
-/** Las dos personas de la casa. Internamente se identifican como A/B; los
- *  nombres visibles (Tony / Sol) son editables desde Configuración. */
-export type Person = "tony" | "sol";
+/** Id de una persona. Los dos originales son "tony" y "sol" (por eso siguen
+ *  leyéndose las filas viejas de la hoja); las que se agregan después llevan
+ *  un id generado tipo "psn_ab12cd34ef56". */
+export type PersonId = string;
 
-export const PEOPLE: Person[] = ["tony", "sol"];
+/** Una persona de la casa. La lista vive en Configuración: se pueden agregar,
+ *  renombrar y desactivar. Desactivar no borra nada del historial: la persona
+ *  deja de aparecer en los formularios pero sus gastos viejos siguen contando. */
+export interface Person {
+  id: PersonId;
+  name: string;
+  /** Acento de color en la UI. Ver PERSON_COLORS en lib/people.ts. */
+  color: string;
+  active: boolean;
+}
 
 /** Categorías sugeridas para los gastos. */
 export const CATEGORIES = [
@@ -24,13 +34,26 @@ export const CATEGORIES = [
 
 export type Category = (typeof CATEGORIES)[number];
 
-/** Formas de dividir un gasto entre los dos. */
-export type SplitType =
-  | "50_50"
-  | "100_tony"
-  | "100_sol"
-  | "percent"
-  | "custom";
+/** Formas de dividir un gasto entre las personas activas.
+ *  - equal:   partes iguales entre todas
+ *  - single:  se lo come una sola (la que tenga el total en `shares`)
+ *  - percent: un porcentaje por persona
+ *  - custom:  un monto por persona */
+export type SplitType = "equal" | "single" | "percent" | "custom";
+
+/** Valores viejos de split_type (cuando la app era de dos personas fijas). */
+const LEGACY_SPLIT_TYPES: Record<string, SplitType> = {
+  "50_50": "equal",
+  "100_tony": "single",
+  "100_sol": "single",
+};
+
+/** Normaliza un split_type leído de la hoja (acepta los valores viejos). */
+export function parseSplitType(raw: string | undefined): SplitType {
+  if (!raw) return "equal";
+  if (raw === "equal" || raw === "single" || raw === "percent" || raw === "custom") return raw;
+  return LEGACY_SPLIT_TYPES[raw] ?? "equal";
+}
 
 /** Origen de un gasto: cargado a mano o leído de un ticket. */
 export type ExpenseSource = "manual" | "ticket";
@@ -60,6 +83,10 @@ export interface Period {
   created_at: string;
 }
 
+/** Cuánto le corresponde pagar a cada persona. Las claves son ids de persona
+ *  y los valores enteros que suman `total`. */
+export type Shares = Record<PersonId, number>;
+
 export interface Expense {
   id: string;
   period_id: string;
@@ -69,11 +96,11 @@ export interface Expense {
   category: Category;
   group: ExpenseGroup; // día a día / tarjeta / fijos
   total: number; // ARS, entero
-  paid_by: Person;
+  paid_by: PersonId;
   split_type: SplitType;
-  share_tony: number; // cuánto le corresponde pagar a Tony
-  share_sol: number; // cuánto le corresponde pagar a Sol
-  created_by: Person | "";
+  /** Parte de cada persona. Suma `total`. */
+  shares: Shares;
+  created_by: PersonId | "";
   source: ExpenseSource;
   notes: string;
   ticket_image_url: string; // reservado para el futuro; hoy queda vacío
@@ -93,8 +120,8 @@ export interface PendingTicket {
   created_at: string;
 }
 
-/** préstamo: alguien le presta plata al otro.
- *  devolucion: alguien le devuelve plata al otro. */
+/** préstamo: alguien le presta plata a otra persona.
+ *  devolucion: alguien le devuelve plata a otra persona. */
 export type LoanType = "prestamo" | "devolucion";
 
 export interface Loan {
@@ -102,8 +129,8 @@ export interface Loan {
   period_id: string;
   date: string; // YYYY-MM-DD
   type: LoanType;
-  from_person: Person; // de quién sale la plata
-  to_person: Person; // a quién le llega
+  from_person: PersonId; // de quién sale la plata
+  to_person: PersonId; // a quién le llega
   amount: number; // ARS, entero
   notes: string;
   created_at: string;
@@ -114,8 +141,8 @@ export interface Settlement {
   id: string;
   period_id: string;
   date: string; // YYYY-MM-DD
-  from_person: Person; // quién paga para saldar
-  to_person: Person; // quién recibe
+  from_person: PersonId; // quién paga para saldar
+  to_person: PersonId; // quién recibe
   amount: number;
   notes: string;
   created_at: string;
@@ -131,13 +158,13 @@ export interface AuditEntry {
 }
 
 export interface Settings {
-  name_tony: string;
-  name_sol: string;
+  /** Las personas de la casa, en el orden en que se muestran. */
+  people: Person[];
 }
 
 // --- Cuentas -----------------------------------------------------------------
 
-/** Cuenta invitada. Tiene sus propios gastos, préstamos, períodos y nombres.
+/** Cuenta invitada. Tiene sus propios gastos, préstamos, períodos y personas.
  *  La cuenta principal no se guarda acá: entra con APP_PIN. */
 export interface Account {
   id: string;
@@ -159,17 +186,34 @@ export interface Invite {
 
 // --- Resultado del cálculo de balance ---------------------------------------
 
-/** Signo de la deuda. `balance` está expresado como "cuánto le debe Sol a Tony".
- *  Positivo => Sol le debe a Tony. Negativo => Tony le debe a Sol. */
-export interface Balance {
-  /** Cuánto le debe Sol a Tony (positivo) o Tony a Sol (negativo). */
-  net: number;
-  /** Quién debe: "tony" (Tony debe), "sol" (Sol debe) o "even". */
-  debtor: Person | "even";
-  /** Quién cobra. Vacío si están en cero. */
-  creditor: Person | "even";
-  /** Monto absoluto de la deuda. */
+/** Una transferencia para saldar: `from` le pasa `amount` a `to`. */
+export interface Transfer {
+  from: PersonId;
+  to: PersonId;
   amount: number;
+}
+
+/** Balance entre todas las personas.
+ *
+ *  `nets` es el neto de cada una: positivo = puso más de lo que le tocaba
+ *  (le deben), negativo = puso menos (debe). La suma de todos los netos es 0.
+ *  `transfers` son los pagos mínimos para volver a cero. */
+export interface Balance {
+  nets: Record<PersonId, number>;
+  transfers: Transfer[];
+  /** True si nadie le debe nada a nadie. */
+  even: boolean;
+  /** Plata total que tiene que cambiar de manos (suma de las transferencias). */
+  amount: number;
+}
+
+/** Cuánto puso y cuánto le correspondía a una persona. */
+export interface PersonTotals {
+  person: PersonId;
+  /** Plata que puso de su bolsillo. */
+  pagado: number;
+  /** Plata que le correspondía poner según la división. */
+  corresponde: number;
 }
 
 /** Números de un grupo de gastos (día a día / tarjeta / fijos) por separado. */
@@ -177,8 +221,7 @@ export interface GroupSummary {
   group: ExpenseGroup;
   label: string;
   totalGastado: number;
-  totalPagadoTony: number;
-  totalPagadoSol: number;
+  porPersona: PersonTotals[];
   /** Quién le debe a quién solo dentro de este grupo. */
   balance: Balance;
   cantidad: number;
@@ -187,14 +230,12 @@ export interface GroupSummary {
 export interface PeriodSummary {
   period: Period | null;
   totalGastado: number;
-  totalPagadoTony: number;
-  totalPagadoSol: number;
-  correspondeTony: number;
-  correspondeSol: number;
+  /** Pagado y correspondido por persona, en el orden de la lista de personas. */
+  porPersona: PersonTotals[];
   /** Desglose por grupo: día a día, tarjeta, fijos. */
   groups: GroupSummary[];
-  /** Balance combinado de todos los gastos del período. Es el total que se
-   *  salda al cerrar: cuánto le tiene que dar uno al otro. */
+  /** Balance combinado de todos los gastos del período. Es lo que se salda al
+   *  cerrar: quién le tiene que pasar cuánto a quién. */
   gastosBalance: Balance;
   /** Deuda de préstamos acumulada (se arrastra entre períodos, no se cierra). */
   prestamosBalance: Balance;

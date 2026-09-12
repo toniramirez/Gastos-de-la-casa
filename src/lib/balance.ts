@@ -1,24 +1,27 @@
 // ==========================================================================
-// Lógica central de balance. Función pura y testeable.
+// Lógica central de balance. Funciones puras y testeables.
 //
-// Convención: `net` = cuánto le debe Sol a Tony.
-//   net > 0  => Sol le debe a Tony
-//   net < 0  => Tony le debe a Sol
-//   net == 0 => están en cero
+// Convención: el balance se expresa como un NETO POR PERSONA.
+//   net > 0  => puso más de lo que le tocaba  => le deben
+//   net < 0  => puso menos de lo que le tocaba => debe
+//   La suma de todos los netos es 0.
 //
-// Un gasto pagado por una persona hace que la otra le deba su parte.
-// Un movimiento de plata de X a Y (préstamo o devolución) siempre significa
-// que Y le debe más a X (o que X le debe menos a Y). Por eso el efecto sobre
-// el balance de cualquier movimiento entre ellos es simplemente el flujo de
-// plata: si la plata va de Tony a Sol, Sol le debe más a Tony.
+// Un gasto le suma a quien lo pagó todo el total (puso esa plata) y le resta
+// a cada persona su parte. Un movimiento de plata de X a Y (préstamo o
+// devolución) le suma a X y le resta a Y: el efecto sobre el balance de
+// cualquier movimiento es simplemente el flujo de la plata.
+//
+// Para saldar, `settleTransfers` arma los pagos mínimos (a lo sumo una
+// transferencia menos que la cantidad de personas): se van cruzando el que
+// más debe con el que más le deben.
 //
 // IMPORTANTE — dos cuentas separadas:
 //   1. Balance de GASTOS: solo los gastos del período. Es lo que se salda al
 //      cerrar (se pasan la plata y quedan en cero). Se resetea cada cierre.
-//   2. Deuda de PRÉSTAMOS: la plata que uno le prestó al otro y todavía no le
-//      devolvió. NO entra en el cierre: se arrastra entre períodos hasta que
-//      aparezca una devolución. Por eso se calcula sobre TODOS los préstamos,
-//      no solo los del período actual.
+//   2. Deuda de PRÉSTAMOS: la plata que alguien prestó y todavía no le
+//      devolvieron. NO entra en el cierre: se arrastra entre períodos hasta
+//      que aparezca una devolución. Por eso se calcula sobre TODOS los
+//      préstamos, no solo los del período actual.
 // ==========================================================================
 
 import {
@@ -30,57 +33,169 @@ import {
   type Period,
   type PeriodSummary,
   type Person,
+  type PersonId,
+  type PersonTotals,
+  type Shares,
+  type SplitType,
+  type Transfer,
 } from "./types";
 
-/** Delta que aporta un gasto al balance (positivo = Sol le debe a Tony). */
-export function expenseDelta(expense: Pick<Expense, "paid_by" | "share_tony" | "share_sol">): number {
-  if (expense.paid_by === "tony") {
-    // Tony puso la plata; Sol le debe su parte.
-    return expense.share_sol;
-  }
-  // Sol puso la plata; Tony le debe su parte => reduce lo que Sol le debe a Tony.
-  return -expense.share_tony;
+/** Suma de las partes de un gasto. */
+export function sumShares(shares: Shares): number {
+  let total = 0;
+  for (const v of Object.values(shares)) total += v;
+  return total;
 }
 
-/** Delta que aporta un préstamo/devolución al balance (positivo = Sol le debe a Tony). */
-export function loanDelta(loan: Pick<Loan, "from_person" | "amount">): number {
-  // Plata que sale de Tony hacia Sol => Sol le debe más a Tony.
-  return loan.from_person === "tony" ? loan.amount : -loan.amount;
+// --- Netos ------------------------------------------------------------------
+
+/** Todos los ids que tienen que aparecer en un balance: las personas de la
+ *  casa más cualquier id que aparezca en los datos (por ejemplo alguien que
+ *  se sacó de la lista pero tiene gastos viejos). */
+function idsInvolved(people: Person[], extra: Iterable<PersonId>): PersonId[] {
+  const ids = people.map((p) => p.id);
+  const seen = new Set(ids);
+  for (const id of extra) {
+    if (id && !seen.has(id)) {
+      seen.add(id);
+      ids.push(id);
+    }
+  }
+  return ids;
 }
 
-/** Construye el objeto Balance a partir del neto (Sol le debe a Tony si > 0). */
-export function balanceFromNet(net: number): Balance {
-  const rounded = Math.round(net);
-  if (rounded === 0) {
-    return { net: 0, debtor: "even", creditor: "even", amount: 0 };
+function emptyNets(ids: PersonId[]): Record<PersonId, number> {
+  const nets: Record<PersonId, number> = {};
+  for (const id of ids) nets[id] = 0;
+  return nets;
+}
+
+/** Ids que aparecen en una lista de gastos (quién pagó y quién tiene parte). */
+function expenseIds(expenses: Expense[]): PersonId[] {
+  const ids: PersonId[] = [];
+  for (const e of expenses) {
+    ids.push(e.paid_by);
+    ids.push(...Object.keys(e.shares ?? {}));
   }
-  if (rounded > 0) {
-    // Sol le debe a Tony.
-    return { net: rounded, debtor: "sol", creditor: "tony", amount: rounded };
+  return ids;
+}
+
+/** Ids que aparecen en una lista de préstamos. */
+function loanIds(loans: Loan[]): PersonId[] {
+  const ids: PersonId[] = [];
+  for (const l of loans) ids.push(l.from_person, l.to_person);
+  return ids;
+}
+
+/** Neto de cada persona según los gastos (positivo = le deben). */
+export function netsFromExpenses(expenses: Expense[], people: Person[]): Record<PersonId, number> {
+  const nets = emptyNets(idsInvolved(people, expenseIds(expenses)));
+  for (const e of expenses) {
+    // Quien pagó puso el total de su bolsillo. (Si la fila no dice quién pagó
+    // —dato roto en la hoja— el gasto solo resta las partes.)
+    if (e.paid_by) nets[e.paid_by] = (nets[e.paid_by] ?? 0) + e.total;
+    // A cada uno le corresponde su parte.
+    for (const [id, share] of Object.entries(e.shares ?? {})) {
+      nets[id] = (nets[id] ?? 0) - share;
+    }
   }
-  // Tony le debe a Sol.
-  return { net: rounded, debtor: "tony", creditor: "sol", amount: -rounded };
+  return roundNets(nets);
+}
+
+/** Neto de cada persona según los préstamos y devoluciones. */
+export function netsFromLoans(loans: Loan[], people: Person[]): Record<PersonId, number> {
+  const nets = emptyNets(idsInvolved(people, loanIds(loans)));
+  for (const l of loans) {
+    if (!l.from_person || !l.to_person) continue;
+    // La plata sale de `from` y llega a `to`: `to` le queda debiendo a `from`.
+    nets[l.from_person] = (nets[l.from_person] ?? 0) + l.amount;
+    nets[l.to_person] = (nets[l.to_person] ?? 0) - l.amount;
+  }
+  return roundNets(nets);
+}
+
+function roundNets(nets: Record<PersonId, number>): Record<PersonId, number> {
+  const out: Record<PersonId, number> = {};
+  for (const [id, v] of Object.entries(nets)) out[id] = Math.round(v);
+  return out;
+}
+
+// --- Transferencias para saldar ---------------------------------------------
+
+/**
+ * Pagos mínimos para que todos queden en cero. Se cruza al que más debe con
+ * el que más le deben, y así bajando. Con N personas salen como máximo N-1
+ * transferencias.
+ */
+export function settleTransfers(nets: Record<PersonId, number>): Transfer[] {
+  // Copias ordenadas por monto para cruzar los más grandes primero.
+  const debtors = Object.entries(nets)
+    .filter(([, v]) => Math.round(v) < 0)
+    .map(([id, v]) => ({ id, amount: -Math.round(v) }))
+    .sort((a, b) => b.amount - a.amount);
+  const creditors = Object.entries(nets)
+    .filter(([, v]) => Math.round(v) > 0)
+    .map(([id, v]) => ({ id, amount: Math.round(v) }))
+    .sort((a, b) => b.amount - a.amount);
+
+  const transfers: Transfer[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < debtors.length && j < creditors.length) {
+    const pay = Math.min(debtors[i].amount, creditors[j].amount);
+    if (pay > 0) {
+      transfers.push({ from: debtors[i].id, to: creditors[j].id, amount: pay });
+    }
+    debtors[i].amount -= pay;
+    creditors[j].amount -= pay;
+    if (debtors[i].amount === 0) i++;
+    if (creditors[j].amount === 0) j++;
+  }
+  return transfers;
+}
+
+/** Arma el Balance completo a partir de los netos por persona. */
+export function balanceFromNets(nets: Record<PersonId, number>): Balance {
+  const rounded = roundNets(nets);
+  const transfers = settleTransfers(rounded);
+  const amount = transfers.reduce((acc, t) => acc + t.amount, 0);
+  return { nets: rounded, transfers, even: transfers.length === 0, amount };
 }
 
 /**
  * Balance SOLO de los gastos de un período. Es lo que se salda al cerrar.
- * (positivo = Sol le debe a Tony).
  */
-export function computeExpenseBalance(expenses: Expense[]): Balance {
-  let net = 0;
-  for (const e of expenses) net += expenseDelta(e);
-  return balanceFromNet(net);
+export function computeExpenseBalance(expenses: Expense[], people: Person[]): Balance {
+  return balanceFromNets(netsFromExpenses(expenses, people));
 }
 
 /**
  * Deuda de préstamos: cuánta plata prestada falta devolver. Se calcula sobre
  * TODOS los préstamos/devoluciones (de todos los períodos), porque se arrastra
- * entre períodos y no se salda al cerrar (positivo = Sol le debe a Tony).
+ * entre períodos y no se salda al cerrar.
  */
-export function computeLoanBalance(loans: Loan[]): Balance {
-  let net = 0;
-  for (const l of loans) net += loanDelta(l);
-  return balanceFromNet(net);
+export function computeLoanBalance(loans: Loan[], people: Person[]): Balance {
+  return balanceFromNets(netsFromLoans(loans, people));
+}
+
+// --- Resumen ----------------------------------------------------------------
+
+/** Cuánto puso y cuánto le correspondía a cada persona. */
+function totalsPerPerson(expenses: Expense[], people: Person[]): PersonTotals[] {
+  const ids = idsInvolved(people, expenseIds(expenses));
+  const pagado = emptyNets(ids);
+  const corresponde = emptyNets(ids);
+  for (const e of expenses) {
+    if (e.paid_by) pagado[e.paid_by] = (pagado[e.paid_by] ?? 0) + e.total;
+    for (const [id, share] of Object.entries(e.shares ?? {})) {
+      corresponde[id] = (corresponde[id] ?? 0) + share;
+    }
+  }
+  return ids.map((id) => ({
+    person: id,
+    pagado: Math.round(pagado[id] ?? 0),
+    corresponde: Math.round(corresponde[id] ?? 0),
+  }));
 }
 
 /**
@@ -91,32 +206,19 @@ export function computeLoanBalance(loans: Loan[]): Balance {
 export function computeSummary(
   period: Period | null,
   expenses: Expense[],
-  loans: Loan[]
+  loans: Loan[],
+  people: Person[]
 ): PeriodSummary {
   let totalGastado = 0;
-  let totalPagadoTony = 0;
-  let totalPagadoSol = 0;
-  let correspondeTony = 0;
-  let correspondeSol = 0;
-
-  for (const e of expenses) {
-    totalGastado += e.total;
-    if (e.paid_by === "tony") totalPagadoTony += e.total;
-    else totalPagadoSol += e.total;
-    correspondeTony += e.share_tony;
-    correspondeSol += e.share_sol;
-  }
+  for (const e of expenses) totalGastado += e.total;
 
   return {
     period,
     totalGastado,
-    totalPagadoTony,
-    totalPagadoSol,
-    correspondeTony,
-    correspondeSol,
-    groups: groupSummaries(expenses),
-    gastosBalance: computeExpenseBalance(expenses),
-    prestamosBalance: computeLoanBalance(loans),
+    porPersona: totalsPerPerson(expenses, people),
+    groups: groupSummaries(expenses, people),
+    gastosBalance: computeExpenseBalance(expenses, people),
+    prestamosBalance: computeLoanBalance(loans, people),
     cantidadGastos: expenses.length,
     cantidadPrestamos: loans.length,
   };
@@ -124,76 +226,123 @@ export function computeSummary(
 
 /** Arma el desglose por grupo (día a día / tarjeta / fijos). Los gastos sin
  *  grupo cuentan como "día a día". */
-export function groupSummaries(expenses: Expense[]): GroupSummary[] {
+export function groupSummaries(expenses: Expense[], people: Person[]): GroupSummary[] {
   return EXPENSE_GROUPS.map(({ value, label }) => {
     const items = expenses.filter((e) => (e.group ?? "dia_a_dia") === value);
     let totalGastado = 0;
-    let totalPagadoTony = 0;
-    let totalPagadoSol = 0;
-    for (const e of items) {
-      totalGastado += e.total;
-      if (e.paid_by === "tony") totalPagadoTony += e.total;
-      else totalPagadoSol += e.total;
-    }
+    for (const e of items) totalGastado += e.total;
     return {
       group: value,
       label,
       totalGastado,
-      totalPagadoTony,
-      totalPagadoSol,
-      balance: computeExpenseBalance(items),
+      porPersona: totalsPerPerson(items, people),
+      balance: computeExpenseBalance(items, people),
       cantidad: items.length,
     };
   });
 }
 
+// --- División de un gasto ---------------------------------------------------
+
+export interface SplitOptions {
+  /** Para split_type = "single": quién se come todo el gasto. */
+  single?: PersonId;
+  /** Para split_type = "percent": porcentaje de cada persona (suma 100). */
+  percents?: Record<PersonId, number>;
+  /** Para split_type = "custom": monto de cada persona (suma el total). */
+  shares?: Record<PersonId, number>;
+}
+
 /**
- * Calcula las porciones (share_tony / share_sol) según el tipo de división.
- * Devuelve enteros que siempre suman `total` (el resto de redondeo va a Tony).
+ * Calcula la parte de cada persona según el tipo de división. Devuelve
+ * enteros que siempre suman `total` (el resto del redondeo se reparte entre
+ * las primeras personas de la lista).
+ *
+ * `people` son las personas entre las que se divide (normalmente las activas).
  */
 export function computeShares(
   total: number,
-  splitType: Expense["split_type"],
-  opts?: { percentTony?: number; shareTony?: number; shareSol?: number }
-): { share_tony: number; share_sol: number } {
+  splitType: SplitType,
+  people: Person[],
+  opts?: SplitOptions
+): Shares {
   const t = Math.round(total);
+  const ids = people.map((p) => p.id);
+  if (ids.length === 0) return {};
+
   switch (splitType) {
-    case "50_50": {
-      const shareSol = Math.round(t / 2);
-      return { share_tony: t - shareSol, share_sol: shareSol };
+    case "single": {
+      const target = opts?.single && ids.includes(opts.single) ? opts.single : ids[0];
+      const shares: Shares = {};
+      for (const id of ids) shares[id] = id === target ? t : 0;
+      return shares;
     }
-    case "100_tony":
-      return { share_tony: t, share_sol: 0 };
-    case "100_sol":
-      return { share_tony: 0, share_sol: t };
+
     case "percent": {
-      const pct = clampPercent(opts?.percentTony ?? 50);
-      const shareTony = Math.round((t * pct) / 100);
-      return { share_tony: shareTony, share_sol: t - shareTony };
+      const percents = opts?.percents ?? {};
+      const raw = ids.map((id) => Math.max(0, Number(percents[id]) || 0));
+      const sum = raw.reduce((a, b) => a + b, 0);
+      // Si los porcentajes no suman nada usable, caemos a partes iguales.
+      if (sum <= 0) return equalShares(t, ids);
+      const shares: Shares = {};
+      let assigned = 0;
+      ids.forEach((id, i) => {
+        const value = Math.round((t * raw[i]) / sum);
+        shares[id] = value;
+        assigned += value;
+      });
+      // El redondeo puede dejar uno o dos pesos sueltos: se los damos a la
+      // persona con la parte más grande.
+      return fixDrift(shares, ids, t - assigned);
     }
+
     case "custom": {
-      const shareTony = Math.round(opts?.shareTony ?? 0);
-      const shareSol = Math.round(opts?.shareSol ?? 0);
-      return { share_tony: shareTony, share_sol: shareSol };
+      const given = opts?.shares ?? {};
+      const shares: Shares = {};
+      for (const id of ids) shares[id] = Math.max(0, Math.round(Number(given[id]) || 0));
+      // Respetamos lo que puso el usuario tal cual (la validación se encarga
+      // de que sume el total), pero sí sumamos las personas que falten en 0.
+      for (const [id, value] of Object.entries(given)) {
+        if (!(id in shares)) shares[id] = Math.max(0, Math.round(Number(value) || 0));
+      }
+      return shares;
     }
+
+    case "equal":
     default:
-      return { share_tony: t - Math.round(t / 2), share_sol: Math.round(t / 2) };
+      return equalShares(t, ids);
   }
 }
 
-function clampPercent(p: number): number {
-  if (Number.isNaN(p)) return 50;
-  return Math.min(100, Math.max(0, p));
+/** Partes iguales sin perder pesos: el resto se reparte de a uno. */
+function equalShares(total: number, ids: PersonId[]): Shares {
+  const base = Math.floor(total / ids.length);
+  let rest = total - base * ids.length;
+  const shares: Shares = {};
+  for (const id of ids) {
+    shares[id] = base + (rest > 0 ? 1 : 0);
+    if (rest > 0) rest--;
+  }
+  return shares;
 }
 
-/** Devuelve quién debe pagarle a quién para saldar (o null si están en cero). */
-export function settlementDirection(
-  balance: Balance
-): { from: Person; to: Person; amount: number } | null {
-  if (balance.debtor === "even" || balance.amount === 0) return null;
-  return {
-    from: balance.debtor,
-    to: balance.creditor as Person,
-    amount: balance.amount,
-  };
+/** Reparte los pesos sueltos del redondeo en la parte más grande. */
+function fixDrift(shares: Shares, ids: PersonId[], drift: number): Shares {
+  if (drift === 0) return shares;
+  let target = ids[0];
+  for (const id of ids) {
+    if ((shares[id] ?? 0) > (shares[target] ?? 0)) target = id;
+  }
+  return { ...shares, [target]: Math.max(0, (shares[target] ?? 0) + drift) };
+}
+
+/** Porcentaje de cada persona dentro de un gasto ya guardado. Sirve para
+ *  reabrir el formulario en modo "porcentaje" con los valores que tenía. */
+export function percentsFromShares(shares: Shares, total: number): Record<PersonId, number> {
+  const out: Record<PersonId, number> = {};
+  if (total <= 0) return out;
+  for (const [id, share] of Object.entries(shares)) {
+    out[id] = Math.round((share / total) * 100);
+  }
+  return out;
 }

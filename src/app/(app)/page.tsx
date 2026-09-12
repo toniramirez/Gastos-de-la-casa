@@ -16,13 +16,13 @@ import {
 import type { SummaryResponse } from "@/lib/api-types";
 import { api } from "@/lib/client";
 import { formatMoney } from "@/lib/format";
-import { useNames } from "@/components/Providers";
+import { usePeople } from "@/components/Providers";
+import { NetsList, TransferList } from "@/components/BalanceSummary";
 import { Card } from "@/components/ui/Card";
 import { ErrorBlock, LoadingBlock } from "@/components/ui/States";
 import { cn } from "@/lib/cn";
 
 export default function DashboardPage() {
-  const { names } = useNames();
   const [data, setData] = useState<SummaryResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -76,19 +76,9 @@ export default function DashboardPage() {
               icon={<Receipt className="h-4 w-4" />}
               delay="delay-2"
             />
-            <StatCard
-              label={`Pagó ${names.tony}`}
-              value={formatMoney(data.summary.totalPagadoTony)}
-              accent="tony"
-              delay="delay-3"
-            />
-            <StatCard
-              label={`Pagó ${names.sol}`}
-              value={formatMoney(data.summary.totalPagadoSol)}
-              accent="sol"
-              delay="delay-4"
-            />
           </div>
+
+          <PagadoPorPersona data={data} />
 
           <QuickActions />
         </div>
@@ -98,12 +88,8 @@ export default function DashboardPage() {
 }
 
 function BalanceCard({ data }: { data: SummaryResponse }) {
-  const { names } = useNames();
   const balance = data.summary.gastosBalance;
-  const even = balance.debtor === "even";
-
-  const debtorName = balance.debtor !== "even" ? names[balance.debtor] : "";
-  const creditorName = balance.creditor !== "even" ? names[balance.creditor] : "";
+  const even = balance.even;
 
   return (
     <div
@@ -131,10 +117,10 @@ function BalanceCard({ data }: { data: SummaryResponse }) {
             <p className="mt-2 animate-count-in text-4xl font-bold tracking-tight">
               {formatMoney(balance.amount)}
             </p>
-            <p className="mt-1.5 text-white/85">
-              <span className="font-semibold text-white">{debtorName}</span> le debe a{" "}
-              <span className="font-semibold text-white">{creditorName}</span>
+            <p className="mb-2 mt-1.5 text-sm text-white/75">
+              {balance.transfers.length === 1 ? "Para saldar" : "Para saldar, estos pagos"}
             </p>
+            <TransferList transfers={balance.transfers} tone="onDark" />
           </>
         )}
       </div>
@@ -145,31 +131,56 @@ function BalanceCard({ data }: { data: SummaryResponse }) {
 /** Deuda de préstamos acumulada. Va aparte del balance de gastos porque no se
  *  salda al cerrar: se arrastra hasta que aparece una devolución. */
 function PrestamosCard({ data }: { data: SummaryResponse }) {
-  const { names } = useNames();
   const balance = data.summary.prestamosBalance;
-  const even = balance.debtor === "even";
-
-  if (even) return null;
-
-  const debtorName = balance.debtor !== "even" ? names[balance.debtor] : "";
-  const creditorName = balance.creditor !== "even" ? names[balance.creditor] : "";
+  if (balance.even) return null;
 
   return (
-    <Card className="flex animate-fade-up items-center gap-3 border-amber-200/70 bg-amber-50/70 delay-1">
-      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 text-white shadow-glow-sm">
-        <HandCoins className="h-5 w-5" />
-      </span>
-      <div className="min-w-0 flex-1">
-        <p className="text-xs font-medium text-amber-700">Préstamos pendientes</p>
-        <p className="mt-0.5 text-sm text-amber-900">
-          <span className="font-semibold">{debtorName}</span> le debe a{" "}
-          <span className="font-semibold">{creditorName}</span>
-        </p>
-        <p className="text-[11px] text-amber-600/80">Se arrastra hasta la devolución</p>
+    <Card className="animate-fade-up border-amber-200/70 bg-amber-50/70 delay-1">
+      <div className="flex items-center gap-3">
+        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 text-white shadow-glow-sm">
+          <HandCoins className="h-5 w-5" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-medium text-amber-700">Préstamos pendientes</p>
+          <p className="text-[11px] text-amber-600/80">Se arrastran hasta la devolución</p>
+        </div>
+        <span className="shrink-0 text-lg font-bold text-amber-900">
+          {formatMoney(balance.amount)}
+        </span>
       </div>
-      <span className="shrink-0 text-lg font-bold text-amber-900">
-        {formatMoney(balance.amount)}
-      </span>
+      <TransferList transfers={balance.transfers} className="mt-3" />
+    </Card>
+  );
+}
+
+/** Cuánto puso cada uno en el período. */
+function PagadoPorPersona({ data }: { data: SummaryResponse }) {
+  const { nameOf, colorFor } = usePeople();
+  const rows = data.summary.porPersona.filter((t) => t.pagado > 0 || t.corresponde > 0);
+  if (rows.length === 0) return null;
+  return (
+    <Card className="animate-fade-up delay-3">
+      <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
+        Quién puso qué
+      </p>
+      <ul className="divide-y divide-slate-100">
+        {rows.map((t) => (
+          <li key={t.person} className="flex items-center gap-2 py-2">
+            <span
+              className="h-2.5 w-2.5 shrink-0 rounded-full"
+              style={{ backgroundColor: colorFor(t.person).base }}
+            />
+            <span className="min-w-0 flex-1 truncate text-sm text-slate-600">{nameOf(t.person)}</span>
+            <span className="text-right">
+              <span className="block text-sm font-bold text-slate-800">{formatMoney(t.pagado)}</span>
+              <span className="block text-[11px] text-slate-400">
+                le tocaba {formatMoney(t.corresponde)}
+              </span>
+            </span>
+          </li>
+        ))}
+      </ul>
+      <NetsList balance={data.summary.gastosBalance} className="mt-2 border-t border-slate-100 pt-1" />
     </Card>
   );
 }
@@ -177,36 +188,19 @@ function PrestamosCard({ data }: { data: SummaryResponse }) {
 function StatCard({
   label,
   value,
-  accent,
   icon,
   delay,
 }: {
   label: string;
   value: string;
-  accent?: "tony" | "sol";
   icon?: React.ReactNode;
   delay?: string;
 }) {
   return (
     <Card className={cn("flex animate-fade-up flex-col justify-between", delay)}>
-      <div className="flex items-center gap-1.5">
-        {icon && (
-          <span
-            className={cn(
-              accent === "tony" ? "text-tony" : accent === "sol" ? "text-sol" : "text-slate-400"
-            )}
-          >
-            {icon}
-          </span>
-        )}
-        <span
-          className={cn(
-            "text-xs font-medium",
-            accent === "tony" ? "text-tony" : accent === "sol" ? "text-sol" : "text-slate-400"
-          )}
-        >
-          {label}
-        </span>
+      <div className="flex items-center gap-1.5 text-slate-400">
+        {icon}
+        <span className="text-xs font-medium">{label}</span>
       </div>
       <span className="mt-1.5 text-lg font-bold tracking-tight text-slate-900">{value}</span>
     </Card>

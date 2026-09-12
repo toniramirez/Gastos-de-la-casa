@@ -1,15 +1,27 @@
 import { describe, expect, it } from "vitest";
 import {
-  balanceFromNet,
+  balanceFromNets,
   computeExpenseBalance,
   computeLoanBalance,
   computeShares,
   computeSummary,
-  expenseDelta,
-  loanDelta,
-  settlementDirection,
+  netsFromExpenses,
+  netsFromLoans,
+  percentsFromShares,
+  settleTransfers,
+  sumShares,
 } from "./balance";
-import type { Expense, Loan } from "./types";
+import { defaultPeople } from "./people";
+import { parseSplitType, type Expense, type Loan, type Person, type Shares } from "./types";
+
+/** Las dos de siempre. */
+const DOS: Person[] = defaultPeople("Tony", "Sol");
+
+/** Tres personas: los ids viejos más una nueva. */
+const TRES: Person[] = [
+  ...DOS,
+  { id: "psn_juli", name: "Juli", color: "violet", active: true },
+];
 
 function makeExpense(partial: Partial<Expense>): Expense {
   return {
@@ -22,9 +34,8 @@ function makeExpense(partial: Partial<Expense>): Expense {
     group: "dia_a_dia",
     total: 0,
     paid_by: "tony",
-    split_type: "50_50",
-    share_tony: 0,
-    share_sol: 0,
+    split_type: "equal",
+    shares: {},
     created_by: "",
     source: "manual",
     notes: "",
@@ -52,102 +63,176 @@ function makeLoan(partial: Partial<Loan>): Loan {
 }
 
 describe("computeShares", () => {
-  it("divide 50/50 sin perder pesos", () => {
-    expect(computeShares(10000, "50_50")).toEqual({ share_tony: 5000, share_sol: 5000 });
-    // impar: el resto queda para Tony
-    expect(computeShares(10001, "50_50")).toEqual({ share_tony: 5000, share_sol: 5001 });
+  it("divide en partes iguales entre dos sin perder pesos", () => {
+    expect(computeShares(10000, "equal", DOS)).toEqual({ tony: 5000, sol: 5000 });
+    // impar: el peso que sobra va a la primera persona
+    expect(computeShares(10001, "equal", DOS)).toEqual({ tony: 5001, sol: 5000 });
   });
 
-  it("100% a cada uno", () => {
-    expect(computeShares(8000, "100_tony")).toEqual({ share_tony: 8000, share_sol: 0 });
-    expect(computeShares(8000, "100_sol")).toEqual({ share_tony: 0, share_sol: 8000 });
+  it("divide en partes iguales entre tres sin perder pesos", () => {
+    const shares = computeShares(10000, "equal", TRES);
+    expect(shares).toEqual({ tony: 3334, sol: 3333, psn_juli: 3333 });
+    expect(sumShares(shares)).toBe(10000);
   });
 
-  it("porcentaje personalizado", () => {
-    expect(computeShares(10000, "percent", { percentTony: 70 })).toEqual({
-      share_tony: 7000,
-      share_sol: 3000,
+  it("una sola persona se hace cargo de todo", () => {
+    expect(computeShares(8000, "single", TRES, { single: "psn_juli" })).toEqual({
+      tony: 0,
+      sol: 0,
+      psn_juli: 8000,
     });
+  });
+
+  it("porcentajes por persona", () => {
+    const shares = computeShares(10000, "percent", TRES, {
+      percents: { tony: 50, sol: 30, psn_juli: 20 },
+    });
+    expect(shares).toEqual({ tony: 5000, sol: 3000, psn_juli: 2000 });
+    expect(sumShares(shares)).toBe(10000);
+  });
+
+  it("porcentajes que no suman 100 se reparten en proporción y no pierden pesos", () => {
+    const shares = computeShares(9000, "percent", TRES, {
+      percents: { tony: 1, sol: 1, psn_juli: 1 },
+    });
+    expect(sumShares(shares)).toBe(9000);
   });
 
   it("montos personalizados", () => {
-    expect(computeShares(10000, "custom", { shareTony: 3000, shareSol: 7000 })).toEqual({
-      share_tony: 3000,
-      share_sol: 7000,
+    expect(
+      computeShares(10000, "custom", TRES, {
+        shares: { tony: 3000, sol: 5000, psn_juli: 2000 },
+      })
+    ).toEqual({ tony: 3000, sol: 5000, psn_juli: 2000 });
+  });
+
+  it("acepta los tipos de división viejos de dos personas", () => {
+    expect(parseSplitType("50_50")).toBe("equal");
+    expect(parseSplitType("100_tony")).toBe("single");
+    expect(computeShares(10000, parseSplitType("50_50"), DOS)).toEqual({ tony: 5000, sol: 5000 });
+  });
+});
+
+describe("netsFromExpenses", () => {
+  it("quien paga queda a favor por lo que pusieron los demás", () => {
+    const e = makeExpense({ total: 10000, paid_by: "tony", shares: { tony: 5000, sol: 5000 } });
+    expect(netsFromExpenses([e], DOS)).toEqual({ tony: 5000, sol: -5000 });
+  });
+
+  it("gasto que paga uno y es 100% de otro", () => {
+    const e = makeExpense({ total: 4000, paid_by: "tony", shares: { tony: 0, sol: 4000 } });
+    expect(netsFromExpenses([e], DOS)).toEqual({ tony: 4000, sol: -4000 });
+  });
+
+  it("con tres personas, los netos suman cero", () => {
+    const e = makeExpense({
+      total: 9000,
+      paid_by: "psn_juli",
+      shares: { tony: 3000, sol: 3000, psn_juli: 3000 },
     });
+    const nets = netsFromExpenses([e], TRES);
+    expect(nets).toEqual({ tony: -3000, sol: -3000, psn_juli: 6000 });
+    expect(Object.values(nets).reduce((a, b) => a + b, 0)).toBe(0);
+  });
+
+  it("cuenta también a alguien que ya no está en la lista", () => {
+    const e = makeExpense({
+      total: 6000,
+      paid_by: "tony",
+      shares: { tony: 3000, psn_ex: 3000 },
+    });
+    expect(netsFromExpenses([e], DOS)).toEqual({ tony: 3000, sol: 0, psn_ex: -3000 });
   });
 });
 
-describe("expenseDelta", () => {
-  it("si Tony paga 10000 dividido 50/50, Sol le debe 5000", () => {
-    const e = makeExpense({ total: 10000, paid_by: "tony", share_tony: 5000, share_sol: 5000 });
-    expect(expenseDelta(e)).toBe(5000);
+describe("settleTransfers", () => {
+  it("un solo pago cuando son dos", () => {
+    expect(settleTransfers({ tony: 5000, sol: -5000 })).toEqual([
+      { from: "sol", to: "tony", amount: 5000 },
+    ]);
   });
 
-  it("si Sol paga 10000 dividido 50/50, Tony le debe 5000 (net negativo)", () => {
-    const e = makeExpense({ total: 10000, paid_by: "sol", share_tony: 5000, share_sol: 5000 });
-    expect(expenseDelta(e)).toBe(-5000);
+  it("con tres personas salen a lo sumo dos pagos", () => {
+    const transfers = settleTransfers({ tony: 12400, sol: -8200, psn_juli: -4200 });
+    expect(transfers).toHaveLength(2);
+    expect(transfers).toEqual([
+      { from: "sol", to: "tony", amount: 8200 },
+      { from: "psn_juli", to: "tony", amount: 4200 },
+    ]);
+    // Lo que se paga es exactamente lo que se debe.
+    expect(transfers.reduce((acc, t) => acc + t.amount, 0)).toBe(12400);
   });
 
-  it("gasto 100% de quien no pagó", () => {
-    // Tony paga algo que es 100% de Sol => Sol le debe todo.
-    const e = makeExpense({ total: 4000, paid_by: "tony", share_tony: 0, share_sol: 4000 });
-    expect(expenseDelta(e)).toBe(4000);
+  it("cruza al que más debe con el que más le deben", () => {
+    const transfers = settleTransfers({ a: 10000, b: 2000, c: -9000, d: -3000 });
+    expect(transfers).toEqual([
+      { from: "c", to: "a", amount: 9000 },
+      { from: "d", to: "a", amount: 1000 },
+      { from: "d", to: "b", amount: 2000 },
+    ]);
+  });
+
+  it("sin deudas no hay pagos", () => {
+    expect(settleTransfers({ tony: 0, sol: 0 })).toEqual([]);
   });
 });
 
-describe("loanDelta", () => {
-  it("Tony le presta a Sol => Sol le debe a Tony", () => {
-    expect(loanDelta(makeLoan({ from_person: "tony", amount: 20000 }))).toBe(20000);
+describe("balanceFromNets", () => {
+  it("marca 'even' cuando no hay nada que pasarse", () => {
+    const b = balanceFromNets({ tony: 0, sol: 0 });
+    expect(b.even).toBe(true);
+    expect(b.amount).toBe(0);
   });
-  it("Sol le presta a Tony => Tony le debe a Sol", () => {
-    expect(loanDelta(makeLoan({ from_person: "sol", amount: 20000 }))).toBe(-20000);
-  });
-  it("Sol le devuelve a Tony reduce lo que Sol debe", () => {
-    expect(loanDelta(makeLoan({ type: "devolucion", from_person: "sol", to_person: "tony", amount: 10000 }))).toBe(-10000);
-  });
-});
 
-describe("balanceFromNet", () => {
-  it("net positivo => Sol le debe a Tony", () => {
-    const b = balanceFromNet(5000);
-    expect(b).toMatchObject({ debtor: "sol", creditor: "tony", amount: 5000 });
-  });
-  it("net negativo => Tony le debe a Sol", () => {
-    const b = balanceFromNet(-3000);
-    expect(b).toMatchObject({ debtor: "tony", creditor: "sol", amount: 3000 });
-  });
-  it("net cero => están en cero", () => {
-    const b = balanceFromNet(0);
-    expect(b).toMatchObject({ debtor: "even", creditor: "even", amount: 0 });
+  it("el monto es la plata que cambia de manos", () => {
+    const b = balanceFromNets({ tony: 12400, sol: -8200, psn_juli: -4200 });
+    expect(b.even).toBe(false);
+    expect(b.amount).toBe(12400);
+    expect(b.transfers).toHaveLength(2);
   });
 });
 
 describe("computeExpenseBalance (solo gastos, es lo que se salda al cerrar)", () => {
   it("no mezcla préstamos: solo neto de gastos", () => {
     const expenses = [
-      // Tony paga 10000 50/50 => +5000
-      makeExpense({ total: 10000, paid_by: "tony", share_tony: 5000, share_sol: 5000 }),
-      // Sol paga 6000 50/50 => -3000
-      makeExpense({ total: 6000, paid_by: "sol", share_tony: 3000, share_sol: 3000 }),
+      // Tony paga 10000 mitad y mitad => +5000 / -5000
+      makeExpense({ total: 10000, paid_by: "tony", shares: { tony: 5000, sol: 5000 } }),
+      // Sol paga 6000 mitad y mitad => -3000 / +3000
+      makeExpense({ total: 6000, paid_by: "sol", shares: { tony: 3000, sol: 3000 } }),
     ];
-    // net = 5000 - 3000 = 2000 => Sol le debe a Tony 2000 (los préstamos no cuentan)
-    const b = computeExpenseBalance(expenses);
-    expect(b).toMatchObject({ net: 2000, debtor: "sol", creditor: "tony", amount: 2000 });
+    const b = computeExpenseBalance(expenses, DOS);
+    expect(b.nets).toEqual({ tony: 2000, sol: -2000 });
+    expect(b.transfers).toEqual([{ from: "sol", to: "tony", amount: 2000 }]);
+  });
+
+  it("tres personas, cada una paga algo", () => {
+    const expenses = [
+      makeExpense({
+        total: 9000,
+        paid_by: "tony",
+        shares: { tony: 3000, sol: 3000, psn_juli: 3000 },
+      }),
+      makeExpense({
+        total: 3000,
+        paid_by: "sol",
+        shares: { tony: 1000, sol: 1000, psn_juli: 1000 },
+      }),
+    ];
+    const b = computeExpenseBalance(expenses, TRES);
+    expect(b.nets).toEqual({ tony: 5000, sol: -1000, psn_juli: -4000 });
+    expect(b.amount).toBe(5000);
   });
 });
 
 describe("computeLoanBalance (deuda de préstamos que se arrastra)", () => {
   it("préstamo menos devolución", () => {
     const loans = [
-      // Tony le presta 20000 a Sol => +20000
       makeLoan({ from_person: "tony", to_person: "sol", amount: 20000 }),
-      // Sol le devuelve 10000 a Tony => -10000
       makeLoan({ type: "devolucion", from_person: "sol", to_person: "tony", amount: 10000 }),
     ];
-    // net = 20000 - 10000 = 10000 => Sol todavía le debe 10000 a Tony
-    const b = computeLoanBalance(loans);
-    expect(b).toMatchObject({ net: 10000, debtor: "sol", creditor: "tony", amount: 10000 });
+    const b = computeLoanBalance(loans, DOS);
+    expect(b.nets).toEqual({ tony: 10000, sol: -10000 });
+    expect(b.transfers).toEqual([{ from: "sol", to: "tony", amount: 10000 }]);
   });
 
   it("queda en cero cuando devolvió todo", () => {
@@ -155,63 +240,87 @@ describe("computeLoanBalance (deuda de préstamos que se arrastra)", () => {
       makeLoan({ from_person: "tony", to_person: "sol", amount: 5000 }),
       makeLoan({ type: "devolucion", from_person: "sol", to_person: "tony", amount: 5000 }),
     ];
-    expect(computeLoanBalance(loans)).toMatchObject({ debtor: "even", amount: 0 });
+    expect(computeLoanBalance(loans, DOS).even).toBe(true);
+  });
+
+  it("préstamos entre tres personas", () => {
+    const loans = [
+      makeLoan({ from_person: "tony", to_person: "psn_juli", amount: 15000 }),
+      makeLoan({ from_person: "sol", to_person: "psn_juli", amount: 5000 }),
+    ];
+    expect(netsFromLoans(loans, TRES)).toEqual({ tony: 15000, sol: 5000, psn_juli: -20000 });
   });
 });
 
 describe("computeSummary", () => {
   it("separa balance de gastos y deuda de préstamos", () => {
     const expenses = [
-      makeExpense({ total: 10000, paid_by: "tony", share_tony: 5000, share_sol: 5000 }),
-      makeExpense({ total: 6000, paid_by: "sol", share_tony: 3000, share_sol: 3000 }),
+      makeExpense({ total: 10000, paid_by: "tony", shares: { tony: 5000, sol: 5000 } }),
+      makeExpense({ total: 6000, paid_by: "sol", shares: { tony: 3000, sol: 3000 } }),
     ];
-    const loans = [makeLoan({ from_person: "tony", amount: 2000 })];
-    const s = computeSummary(null, expenses, loans);
+    const loans = [makeLoan({ from_person: "tony", to_person: "sol", amount: 2000 })];
+    const s = computeSummary(null, expenses, loans, DOS);
+
     expect(s.totalGastado).toBe(16000);
-    expect(s.totalPagadoTony).toBe(10000);
-    expect(s.totalPagadoSol).toBe(6000);
-    expect(s.correspondeTony).toBe(8000);
-    expect(s.correspondeSol).toBe(8000);
+    expect(s.porPersona).toEqual([
+      { person: "tony", pagado: 10000, corresponde: 8000 },
+      { person: "sol", pagado: 6000, corresponde: 8000 },
+    ]);
     expect(s.cantidadGastos).toBe(2);
     expect(s.cantidadPrestamos).toBe(1);
-    // Gastos: 5000 - 3000 = 2000 (esto se salda al cerrar)
-    expect(s.gastosBalance.net).toBe(2000);
-    // Préstamos: 2000 aparte (esto se arrastra)
-    expect(s.prestamosBalance.net).toBe(2000);
+    // Gastos: esto se salda al cerrar.
+    expect(s.gastosBalance.nets).toEqual({ tony: 2000, sol: -2000 });
+    // Préstamos: esto se arrastra, va aparte.
+    expect(s.prestamosBalance.nets).toEqual({ tony: 2000, sol: -2000 });
   });
 
-  it("desglosa el balance por grupo y el total combinado cuadra", () => {
+  it("desglosa por grupo y la suma de los netos por grupo cuadra con el total", () => {
     const expenses = [
-      // Día a día: Tony paga 10000 50/50 => +5000 (Sol le debe 5000)
-      makeExpense({ group: "dia_a_dia", total: 10000, paid_by: "tony", share_tony: 5000, share_sol: 5000 }),
-      // Tarjeta (la paga Sol): 8000, mitad de Tony => Tony le debe 4000 => -4000
-      makeExpense({ group: "tarjeta", total: 8000, paid_by: "sol", share_tony: 4000, share_sol: 4000 }),
-      // Fijos: alquiler 30000 que paga Sol, 50/50 => Tony le debe 15000 => -15000
-      makeExpense({ group: "fijos", total: 30000, paid_by: "sol", share_tony: 15000, share_sol: 15000 }),
+      makeExpense({
+        group: "dia_a_dia",
+        total: 9000,
+        paid_by: "tony",
+        shares: { tony: 3000, sol: 3000, psn_juli: 3000 },
+      }),
+      makeExpense({
+        group: "tarjeta",
+        total: 6000,
+        paid_by: "sol",
+        shares: { tony: 2000, sol: 2000, psn_juli: 2000 },
+      }),
+      makeExpense({
+        group: "fijos",
+        total: 30000,
+        paid_by: "psn_juli",
+        shares: { tony: 10000, sol: 10000, psn_juli: 10000 },
+      }),
     ];
-    const s = computeSummary(null, expenses, []);
+    const s = computeSummary(null, expenses, [], TRES);
 
     const dia = s.groups.find((g) => g.group === "dia_a_dia")!;
     const tarjeta = s.groups.find((g) => g.group === "tarjeta")!;
     const fijos = s.groups.find((g) => g.group === "fijos")!;
 
-    expect(dia.balance).toMatchObject({ debtor: "sol", creditor: "tony", amount: 5000 });
-    expect(tarjeta.balance).toMatchObject({ debtor: "tony", creditor: "sol", amount: 4000 });
-    expect(fijos.balance).toMatchObject({ debtor: "tony", creditor: "sol", amount: 15000 });
+    expect(dia.balance.nets).toEqual({ tony: 6000, sol: -3000, psn_juli: -3000 });
+    expect(tarjeta.balance.nets).toEqual({ tony: -2000, sol: 4000, psn_juli: -2000 });
+    expect(fijos.balance.nets).toEqual({ tony: -10000, sol: -10000, psn_juli: 20000 });
 
-    // Combinado: 5000 - 4000 - 15000 = -14000 => Tony le debe 14000 a Sol
-    expect(s.gastosBalance).toMatchObject({ net: -14000, debtor: "tony", creditor: "sol", amount: 14000 });
-    // La suma de los netos por grupo debe igualar el total.
-    const sumaGrupos = s.groups.reduce((acc, g) => acc + g.balance.net, 0);
-    expect(sumaGrupos).toBe(s.gastosBalance.net);
+    // El neto combinado es la suma de los netos de cada grupo, persona por persona.
+    for (const p of TRES) {
+      const suma = s.groups.reduce((acc, g) => acc + (g.balance.nets[p.id] ?? 0), 0);
+      expect(suma).toBe(s.gastosBalance.nets[p.id]);
+    }
+    expect(s.gastosBalance.nets).toEqual({ tony: -6000, sol: -9000, psn_juli: 15000 });
   });
 });
 
-describe("settlementDirection", () => {
-  it("Sol paga a Tony cuando Sol debe", () => {
-    expect(settlementDirection(balanceFromNet(4000))).toEqual({ from: "sol", to: "tony", amount: 4000 });
+describe("percentsFromShares", () => {
+  it("reconstruye los porcentajes de un gasto guardado", () => {
+    const shares: Shares = { tony: 5000, sol: 3000, psn_juli: 2000 };
+    expect(percentsFromShares(shares, 10000)).toEqual({ tony: 50, sol: 30, psn_juli: 20 });
   });
-  it("null si están en cero", () => {
-    expect(settlementDirection(balanceFromNet(0))).toBeNull();
+
+  it("no explota con total 0", () => {
+    expect(percentsFromShares({ tony: 0 }, 0)).toEqual({});
   });
 });

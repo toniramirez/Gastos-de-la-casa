@@ -10,9 +10,10 @@ import {
   type Category,
   type ExpenseGroup,
   type Person,
+  type PersonId,
   type SplitType,
 } from "@/lib/types";
-import { useNames } from "@/components/Providers";
+import { usePeople } from "@/components/Providers";
 import { Button } from "@/components/ui/Button";
 import { Field, Input, Select, Textarea } from "@/components/ui/Field";
 import { MoneyInput } from "@/components/ui/MoneyInput";
@@ -26,16 +27,25 @@ export interface ExpenseFormValue {
   category: Category;
   group: ExpenseGroup;
   total: number;
-  paid_by: Person;
+  paid_by: PersonId;
   split_type: SplitType;
-  percent_tony: number;
-  share_tony: number;
-  share_sol: number;
+  /** Para split_type = "single": quién se hace cargo de todo. */
+  single_person: PersonId;
+  /** Para split_type = "percent": porcentaje de cada persona. */
+  percents: Record<PersonId, number>;
+  /** Para split_type = "custom": monto de cada persona. */
+  shares: Record<PersonId, number>;
   notes: string;
   source: "manual" | "ticket";
 }
 
-export function emptyExpense(overrides?: Partial<ExpenseFormValue>): ExpenseFormValue {
+/** Valor inicial del formulario. `people` son las personas entre las que se
+ *  divide (normalmente las activas): de ahí salen los valores por defecto. */
+export function emptyExpense(
+  people: Person[],
+  overrides?: Partial<ExpenseFormValue>
+): ExpenseFormValue {
+  const first = people[0]?.id ?? "";
   const base: ExpenseFormValue = {
     date: todayISO(),
     description: "",
@@ -43,11 +53,11 @@ export function emptyExpense(overrides?: Partial<ExpenseFormValue>): ExpenseForm
     category: "Supermercado",
     group: "dia_a_dia",
     total: 0,
-    paid_by: "tony",
-    split_type: "50_50",
-    percent_tony: 50,
-    share_tony: 0,
-    share_sol: 0,
+    paid_by: first,
+    split_type: "equal",
+    single_person: first,
+    percents: evenPercents(people),
+    shares: {},
     notes: "",
     source: "manual",
   };
@@ -58,12 +68,21 @@ export function emptyExpense(overrides?: Partial<ExpenseFormValue>): ExpenseForm
   return base;
 }
 
-const SPLIT_OPTIONS: { value: SplitType; label: (n: { tony: string; sol: string }) => string }[] = [
-  { value: "50_50", label: () => "Mitad y mitad" },
-  { value: "100_tony", label: (n) => `Todo ${n.tony}` },
-  { value: "100_sol", label: (n) => `Todo ${n.sol}` },
-  { value: "percent", label: () => "Porcentaje" },
-  { value: "custom", label: () => "Montos" },
+/** Porcentajes parejos (el resto va a la primera persona para que sume 100). */
+function evenPercents(people: Person[]): Record<PersonId, number> {
+  const out: Record<PersonId, number> = {};
+  if (people.length === 0) return out;
+  const each = Math.floor(100 / people.length);
+  people.forEach((p) => (out[p.id] = each));
+  out[people[0].id] = 100 - each * (people.length - 1);
+  return out;
+}
+
+const SPLIT_OPTIONS: { value: SplitType; label: string }[] = [
+  { value: "equal", label: "Partes iguales" },
+  { value: "single", label: "Una sola" },
+  { value: "percent", label: "Porcentaje" },
+  { value: "custom", label: "Montos" },
 ];
 
 export function ExpenseForm({
@@ -77,8 +96,21 @@ export function ExpenseForm({
   onSubmit: (value: ExpenseFormValue) => Promise<void>;
   onCancel?: () => void;
 }) {
-  const { names } = useNames();
-  const [v, setV] = useState<ExpenseFormValue>(emptyExpense(initial));
+  const { people, active } = usePeople();
+
+  // El gasto se divide entre las personas activas. Si estamos editando un
+  // gasto viejo en el que participaba alguien que ya no está, esa persona
+  // también entra (así no se le borra la parte sin querer).
+  const splitPeople = useMemo(() => {
+    const extra = people.filter(
+      (p) =>
+        !p.active &&
+        ((initial?.shares?.[p.id] ?? 0) > 0 || initial?.paid_by === p.id || initial?.single_person === p.id)
+    );
+    return [...active, ...extra];
+  }, [people, active, initial?.shares, initial?.paid_by, initial?.single_person]);
+
+  const [v, setV] = useState<ExpenseFormValue>(() => emptyExpense(splitPeople, initial));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -86,16 +118,28 @@ export function ExpenseForm({
     setV((prev) => ({ ...prev, [key]: val }));
   }
 
-  // Vista previa de cuánto le corresponde a cada uno.
-  const preview = useMemo(() => {
-    return computeShares(v.total, v.split_type, {
-      percentTony: v.percent_tony,
-      shareTony: v.share_tony,
-      shareSol: v.share_sol,
-    });
-  }, [v.total, v.split_type, v.percent_tony, v.share_tony, v.share_sol]);
+  function setPercent(id: PersonId, pct: number) {
+    setV((prev) => ({ ...prev, percents: { ...prev.percents, [id]: pct } }));
+  }
 
-  const customRemaining = v.total - (v.share_tony + v.share_sol);
+  function setShare(id: PersonId, amount: number) {
+    setV((prev) => ({ ...prev, shares: { ...prev.shares, [id]: amount } }));
+  }
+
+  // Vista previa de cuánto le corresponde a cada uno.
+  const preview = useMemo(
+    () =>
+      computeShares(v.total, v.split_type, splitPeople, {
+        single: v.single_person,
+        percents: v.percents,
+        shares: v.shares,
+      }),
+    [v.total, v.split_type, v.single_person, v.percents, v.shares, splitPeople]
+  );
+
+  const percentSum = splitPeople.reduce((acc, p) => acc + (v.percents[p.id] ?? 0), 0);
+  const sharesSum = splitPeople.reduce((acc, p) => acc + (v.shares[p.id] ?? 0), 0);
+  const customRemaining = v.total - sharesSum;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -108,14 +152,17 @@ export function ExpenseForm({
       setError("Las partes tienen que sumar el total");
       return;
     }
+    if (v.split_type === "percent" && percentSum <= 0) {
+      setError("Poné al menos un porcentaje");
+      return;
+    }
     setSubmitting(true);
     try {
-      // Para custom mandamos los shares tal cual; para el resto, los calculados.
-      const value: ExpenseFormValue =
-        v.split_type === "custom"
-          ? v
-          : { ...v, share_tony: preview.share_tony, share_sol: preview.share_sol };
-      await onSubmit(value);
+      // Mandamos solo las partes de las personas que participan; el server
+      // recalcula igual desde split_type (no confía en el cliente).
+      const shares: Record<PersonId, number> = {};
+      for (const p of splitPeople) shares[p.id] = v.shares[p.id] ?? 0;
+      await onSubmit({ ...v, shares });
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo guardar");
       setSubmitting(false);
@@ -132,7 +179,7 @@ export function ExpenseForm({
 
       <div className="rounded-3xl bg-white/90 p-4 shadow-card ring-1 ring-slate-900/5 backdrop-blur-sm">
         <span className="mb-2 block text-sm font-medium text-slate-700">¿Quién pagó?</span>
-        <PersonToggle value={v.paid_by} onChange={(p) => set("paid_by", p)} />
+        <PersonToggle value={v.paid_by} onChange={(p) => set("paid_by", p)} people={splitPeople} />
       </div>
 
       {/* Cuenta / grupo: separa el día a día de la tarjeta y los fijos. */}
@@ -160,7 +207,7 @@ export function ExpenseForm({
       {/* División */}
       <div className="rounded-3xl bg-white/90 p-4 shadow-card ring-1 ring-slate-900/5 backdrop-blur-sm">
         <span className="mb-2 block text-sm font-medium text-slate-700">¿Cómo se divide?</span>
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-2 gap-2">
           {SPLIT_OPTIONS.map((opt) => (
             <button
               key={opt.value}
@@ -173,40 +220,70 @@ export function ExpenseForm({
                   : "border-slate-200 bg-white/70 text-slate-500 hover:border-slate-300"
               )}
             >
-              {opt.label(names)}
+              {opt.label}
             </button>
           ))}
         </div>
 
-        {v.split_type === "percent" && (
+        {v.split_type === "single" && (
           <div className="mt-4">
-            <div className="mb-1 flex justify-between text-sm font-medium text-slate-600">
-              <span>{names.tony}: {v.percent_tony}%</span>
-              <span>{names.sol}: {100 - v.percent_tony}%</span>
-            </div>
-            <input
-              type="range"
-              min={0}
-              max={100}
-              step={5}
-              value={v.percent_tony}
-              onChange={(e) => set("percent_tony", parseInt(e.target.value, 10))}
-              className="w-full accent-brand-600"
+            <span className="mb-2 block text-sm font-medium text-slate-700">
+              ¿Quién se hace cargo?
+            </span>
+            <PersonToggle
+              value={v.single_person}
+              onChange={(p) => set("single_person", p)}
+              people={splitPeople}
             />
           </div>
         )}
 
-        {v.split_type === "custom" && (
-          <div className="mt-4 grid grid-cols-2 gap-2">
-            <Field label={names.tony}>
-              <MoneyInput value={v.share_tony} onChange={(n) => set("share_tony", n)} />
-            </Field>
-            <Field label={names.sol}>
-              <MoneyInput value={v.share_sol} onChange={(n) => set("share_sol", n)} />
-            </Field>
+        {v.split_type === "percent" && (
+          <div className="mt-4 space-y-2">
+            {splitPeople.map((p) => (
+              <div key={p.id} className="flex items-center gap-3">
+                <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-600">
+                  {p.name}
+                </span>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    min={0}
+                    max={100}
+                    value={v.percents[p.id] ?? 0}
+                    onChange={(e) => setPercent(p.id, Math.max(0, parseInt(e.target.value, 10) || 0))}
+                    className="w-20 rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-right text-sm focus:border-brand-500 focus:outline-none focus:ring-4 focus:ring-brand-500/15"
+                  />
+                  <span className="text-sm text-slate-400">%</span>
+                </div>
+              </div>
+            ))}
             <p
               className={cn(
-                "col-span-2 flex items-center gap-1 text-xs font-medium",
+                "text-xs font-medium",
+                percentSum === 100 ? "text-emerald-600" : "text-amber-600"
+              )}
+            >
+              {percentSum === 100
+                ? "Los porcentajes suman 100%"
+                : `Suman ${percentSum}%: se reparte en proporción`}
+            </p>
+          </div>
+        )}
+
+        {v.split_type === "custom" && (
+          <div className="mt-4 space-y-3">
+            <div className="grid grid-cols-2 gap-2">
+              {splitPeople.map((p) => (
+                <Field key={p.id} label={p.name}>
+                  <MoneyInput value={v.shares[p.id] ?? 0} onChange={(n) => setShare(p.id, n)} />
+                </Field>
+              ))}
+            </div>
+            <p
+              className={cn(
+                "flex items-center gap-1 text-xs font-medium",
                 Math.round(customRemaining) === 0 ? "text-emerald-600" : "text-amber-600"
               )}
             >
@@ -223,11 +300,18 @@ export function ExpenseForm({
 
         {/* Preview */}
         {v.total > 0 && v.split_type !== "custom" && (
-          <div className="mt-4 flex items-center justify-between rounded-2xl bg-slate-50 px-4 py-2.5 text-sm">
-            <span className="text-slate-500">Le toca a cada uno</span>
-            <span className="font-semibold text-slate-700">
-              {names.tony} {formatMoney(preview.share_tony)} · {names.sol} {formatMoney(preview.share_sol)}
-            </span>
+          <div className="mt-4 rounded-2xl bg-slate-50 px-4 py-2.5 text-sm">
+            <p className="mb-1 text-slate-500">Le toca a cada uno</p>
+            <ul className="space-y-0.5">
+              {splitPeople.map((p) => (
+                <li key={p.id} className="flex justify-between gap-2">
+                  <span className="truncate text-slate-500">{p.name}</span>
+                  <span className="font-semibold text-slate-700">
+                    {formatMoney(preview[p.id] ?? 0)}
+                  </span>
+                </li>
+              ))}
+            </ul>
           </div>
         )}
       </div>

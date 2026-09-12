@@ -5,26 +5,20 @@ import { useRouter } from "next/navigation";
 import { CheckCircle2, Database, LogOut, UserCircle2 } from "lucide-react";
 import { AccountsCard } from "@/components/AccountsCard";
 import { PageHeader } from "@/components/PageHeader";
-import { useNames, useToast } from "@/components/Providers";
+import { PeopleCard } from "@/components/PeopleCard";
 import { api } from "@/lib/client";
 import type { MeResponse, SettingsResponse } from "@/lib/api-types";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
-import { Field, Input } from "@/components/ui/Field";
 import { LoadingBlock } from "@/components/ui/States";
 import { cn } from "@/lib/cn";
 
 export default function ConfiguracionPage() {
   const router = useRouter();
-  const { refreshNames } = useNames();
-  const { toast } = useToast();
 
   const [loaded, setLoaded] = useState(false);
-  const [nameTony, setNameTony] = useState("");
-  const [nameSol, setNameSol] = useState("");
   const [usingMemory, setUsingMemory] = useState(false);
   const [me, setMe] = useState<MeResponse | null>(null);
-  const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -32,8 +26,6 @@ export default function ConfiguracionPage() {
         api.get<SettingsResponse>("/api/settings"),
         api.get<MeResponse>("/api/me"),
       ]);
-      setNameTony(res.settings.name_tony);
-      setNameSol(res.settings.name_sol);
       setUsingMemory(Boolean(res.usingMemory));
       setMe(meRes);
     } finally {
@@ -44,19 +36,6 @@ export default function ConfiguracionPage() {
   useEffect(() => {
     void load();
   }, [load]);
-
-  async function save() {
-    setSaving(true);
-    try {
-      await api.put("/api/settings", { name_tony: nameTony.trim(), name_sol: nameSol.trim() });
-      await refreshNames();
-      toast("Guardado", "success");
-    } catch (err) {
-      toast(err instanceof Error ? err.message : "No se pudo guardar", "error");
-    } finally {
-      setSaving(false);
-    }
-  }
 
   async function logout() {
     await api.post("/api/logout");
@@ -84,18 +63,7 @@ export default function ConfiguracionPage() {
             </Card>
           )}
 
-          <Card className="animate-fade-up space-y-4">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">Nombres</h2>
-            <Field label="Persona A">
-              <Input value={nameTony} onChange={(e) => setNameTony(e.target.value)} placeholder="Tony" />
-            </Field>
-            <Field label="Persona B">
-              <Input value={nameSol} onChange={(e) => setNameSol(e.target.value)} placeholder="Sol" />
-            </Field>
-            <Button fullWidth onClick={save} loading={saving} disabled={!nameTony.trim() || !nameSol.trim()}>
-              Guardar nombres
-            </Button>
-          </Card>
+          <PeopleCard />
 
           {me?.isMain && <AccountsCard />}
 

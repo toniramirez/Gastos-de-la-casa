@@ -4,7 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { CheckCircle2, HandCoins, PartyPopper, Scale } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
-import { useNames, useToast } from "@/components/Providers";
+import { NetsList, TransferList } from "@/components/BalanceSummary";
+import { usePeople, useToast } from "@/components/Providers";
 import { api } from "@/lib/client";
 import type { SummaryResponse } from "@/lib/api-types";
 import { formatMoney } from "@/lib/format";
@@ -17,7 +18,7 @@ import { cn } from "@/lib/cn";
 
 export default function CierrePage() {
   const router = useRouter();
-  const { names } = useNames();
+  const { nameOf } = usePeople();
   const { toast } = useToast();
 
   const [data, setData] = useState<SummaryResponse | null>(null);
@@ -72,7 +73,9 @@ export default function CierrePage() {
   }
 
   const s = data.summary;
-  const settlement = data.settlement;
+  const transfers = data.transfers;
+  // Con más de dos personas puede haber más de un pago para saldar.
+  const haySaldo = transfers.length > 0;
 
   return (
     <div>
@@ -82,7 +85,7 @@ export default function CierrePage() {
       <div
         className={cn(
           "relative animate-fade-up overflow-hidden rounded-3xl p-5 text-white shadow-glow",
-          settlement ? "bg-brand-mesh" : "bg-emerald-gradient"
+          haySaldo ? "bg-brand-mesh" : "bg-emerald-gradient"
         )}
         style={{ backgroundSize: "180% 180%" }}
       >
@@ -92,16 +95,17 @@ export default function CierrePage() {
             <Scale className="h-4 w-4" />
             <span className="text-sm font-medium">Resultado de gastos</span>
           </div>
-          {settlement ? (
+          {haySaldo ? (
             <div className="mt-2">
               <p className="animate-count-in text-4xl font-bold tracking-tight">
-                {formatMoney(settlement.amount)}
+                {formatMoney(s.gastosBalance.amount)}
               </p>
-              <p className="mt-1.5 text-white/90">
-                Para saldar los gastos del período,{" "}
-                <span className="font-semibold">{names[settlement.from]}</span> le tiene que pagar a{" "}
-                <span className="font-semibold">{names[settlement.to]}</span>.
+              <p className="mb-2 mt-1.5 text-sm text-white/80">
+                {transfers.length === 1
+                  ? "Para saldar los gastos del período"
+                  : "Para saldar los gastos del período, estos pagos"}
               </p>
+              <TransferList transfers={transfers} tone="onDark" />
             </div>
           ) : (
             <p className="mt-2 flex items-center gap-2 text-2xl font-bold">
@@ -126,15 +130,17 @@ export default function CierrePage() {
                       {g.cantidad} {g.cantidad === 1 ? "gasto" : "gastos"} · {formatMoney(g.totalGastado)}
                     </p>
                   </div>
-                  <div className="text-right">
-                    {g.balance.debtor === "even" ? (
+                  <div className="max-w-[55%] text-right">
+                    {g.balance.even ? (
                       <span className="text-sm font-semibold text-emerald-600">En cero</span>
                     ) : (
                       <>
                         <p className="text-sm font-bold text-slate-800">{formatMoney(g.balance.amount)}</p>
-                        <p className="text-[11px] text-slate-400">
-                          {names[g.balance.debtor]} → {names[g.balance.creditor as "tony" | "sol"]}
-                        </p>
+                        {g.balance.transfers.map((t, i) => (
+                          <p key={`${t.from}-${t.to}-${i}`} className="text-[11px] text-slate-400">
+                            {nameOf(t.from)} → {nameOf(t.to)} {formatMoney(t.amount)}
+                          </p>
+                        ))}
                       </>
                     )}
                   </div>
@@ -145,23 +151,29 @@ export default function CierrePage() {
       )}
 
       {/* Detalle */}
-      <Card className="mt-4 animate-fade-up divide-y divide-slate-100 delay-2">
-        <SummaryRow label="Total de gastos" value={formatMoney(s.totalGastado)} />
-        <SummaryRow label={`Pagó ${names.tony}`} value={formatMoney(s.totalPagadoTony)} />
-        <SummaryRow label={`Pagó ${names.sol}`} value={formatMoney(s.totalPagadoSol)} />
-        <SummaryRow label={`Le correspondía a ${names.tony}`} value={formatMoney(s.correspondeTony)} />
-        <SummaryRow label={`Le correspondía a ${names.sol}`} value={formatMoney(s.correspondeSol)} />
+      <Card className="mt-4 animate-fade-up delay-2">
+        <div className="divide-y divide-slate-100">
+          <SummaryRow label="Total de gastos" value={formatMoney(s.totalGastado)} />
+          {s.porPersona.map((t) => (
+            <SummaryRow
+              key={t.person}
+              label={`Pagó ${nameOf(t.person)}`}
+              value={formatMoney(t.pagado)}
+              hint={`le correspondía ${formatMoney(t.corresponde)}`}
+            />
+          ))}
+        </div>
+        <NetsList balance={s.gastosBalance} className="mt-2 border-t border-slate-100 pt-1" />
       </Card>
 
       {/* Préstamos: no se saldan acá, se arrastran al próximo período. */}
-      {s.prestamosBalance.debtor !== "even" && (
+      {!s.prestamosBalance.even && (
         <Card className="mt-4 flex animate-fade-up items-start gap-3 border-amber-200/70 bg-amber-50/70">
           <HandCoins className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
-          <div className="text-sm text-amber-900">
+          <div className="min-w-0 flex-1 text-sm text-amber-900">
             <p className="font-semibold">Préstamos pendientes: {formatMoney(s.prestamosBalance.amount)}</p>
-            <p className="mt-0.5 text-amber-700">
-              <span className="font-semibold">{names[s.prestamosBalance.debtor]}</span> le debe a{" "}
-              <span className="font-semibold">{names[s.prestamosBalance.creditor as "tony" | "sol"]}</span>.
+            <TransferList transfers={s.prestamosBalance.transfers} className="mt-1.5" />
+            <p className="mt-1.5 text-amber-700">
               Esto <span className="font-semibold">no se salda en el cierre</span>: se arrastra al
               próximo período hasta que se registre la devolución.
             </p>
@@ -183,7 +195,7 @@ export default function CierrePage() {
         <Button
           size="lg"
           fullWidth
-          variant={settlement ? "primary" : "success"}
+          variant={haySaldo ? "primary" : "success"}
           onClick={() => setConfirming(true)}
         >
           <CheckCircle2 className="h-5 w-5" />
@@ -200,8 +212,10 @@ export default function CierrePage() {
         danger={false}
         title="¿Cerrar el período?"
         message={
-          settlement
-            ? `Confirmá que ${names[settlement.from]} ya le pagó ${formatMoney(settlement.amount)} a ${names[settlement.to]} por los gastos. Se cerrará este período y arrancará uno nuevo. Los préstamos pendientes se mantienen.`
+          haySaldo
+            ? `Confirmá que ya se hicieron estos pagos por los gastos: ${transfers
+                .map((t) => `${nameOf(t.from)} → ${nameOf(t.to)} ${formatMoney(t.amount)}`)
+                .join("; ")}. Se cerrará este período y arrancará uno nuevo. Los préstamos pendientes se mantienen.`
             : "Se cerrará este período y arrancará uno nuevo. Los préstamos pendientes se mantienen."
         }
         confirmLabel="Sí, cerrar"
@@ -213,11 +227,22 @@ export default function CierrePage() {
   );
 }
 
-function SummaryRow({ label, value }: { label: string; value: string }) {
+function SummaryRow({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+}) {
   return (
-    <div className="flex items-center justify-between py-2.5">
-      <span className="text-sm text-slate-500">{label}</span>
-      <span className="font-semibold text-slate-800">{value}</span>
+    <div className="flex items-center justify-between gap-2 py-2.5">
+      <span className="min-w-0 truncate text-sm text-slate-500">{label}</span>
+      <span className="shrink-0 text-right">
+        <span className="block font-semibold text-slate-800">{value}</span>
+        {hint && <span className="block text-[11px] text-slate-400">{hint}</span>}
+      </span>
     </div>
   );
 }

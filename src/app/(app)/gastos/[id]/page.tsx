@@ -7,7 +7,14 @@ import { ExpenseForm, type ExpenseFormValue } from "@/components/ExpenseForm";
 import { useToast } from "@/components/Providers";
 import { api } from "@/lib/client";
 import { ErrorBlock, LoadingBlock } from "@/components/ui/States";
-import type { Expense } from "@/lib/types";
+import { percentsFromShares } from "@/lib/balance";
+import type { Expense, PersonId } from "@/lib/types";
+
+/** Con split_type = "single", quién se hizo cargo de todo el gasto. */
+function singlePersonOf(expense: Expense): PersonId | undefined {
+  const entries = Object.entries(expense.shares ?? {});
+  return entries.find(([, share]) => Math.round(share) === Math.round(expense.total))?.[0];
+}
 
 export default function EditarGastoPage() {
   const router = useRouter();
@@ -46,10 +53,10 @@ export default function EditarGastoPage() {
         total: expense.total,
         paid_by: expense.paid_by,
         split_type: expense.split_type,
-        percent_tony:
-          expense.total > 0 ? Math.round((expense.share_tony / expense.total) * 100) : 50,
-        share_tony: expense.share_tony,
-        share_sol: expense.share_sol,
+        // Para "una sola persona": la que tiene toda la parte del gasto.
+        single_person: singlePersonOf(expense),
+        percents: percentsFromShares(expense.shares, expense.total),
+        shares: expense.shares,
         notes: expense.notes,
         source: expense.source,
       }

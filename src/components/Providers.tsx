@@ -1,7 +1,8 @@
 "use client";
 
 // ==========================================================================
-// Contextos globales del cliente: nombres (Tony/Sol editables) y toasts.
+// Contextos globales del cliente: las personas de la casa (editables desde
+// Configuración) y los toasts.
 // ==========================================================================
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
@@ -9,26 +10,28 @@ import { CheckCircle2, Info, XCircle } from "lucide-react";
 import { api } from "@/lib/client";
 import { cn } from "@/lib/cn";
 import type { SettingsResponse } from "@/lib/api-types";
-import type { Person } from "@/lib/types";
+import { activePeople, colorOf, DEFAULT_COLOR, personName, type PersonColor } from "@/lib/people";
+import type { Person, PersonId } from "@/lib/types";
 
-// --- Nombres ---------------------------------------------------------------
+// --- Personas ---------------------------------------------------------------
 
-interface Names {
-  tony: string;
-  sol: string;
+interface PeopleContextValue {
+  /** Todas, incluidas las desactivadas (para leer el historial). */
+  people: Person[];
+  /** Las que hoy participan de los gastos: es lo que va en los formularios. */
+  active: Person[];
+  refreshPeople: () => Promise<void>;
+  /** Nombre visible de una persona por id. */
+  nameOf: (id: PersonId | "") => string;
+  /** Acento de color de una persona por id. */
+  colorFor: (id: PersonId | "") => PersonColor;
 }
 
-interface NamesContextValue {
-  names: Names;
-  refreshNames: () => Promise<void>;
-  nameOf: (p: Person) => string;
-}
+const PeopleContext = createContext<PeopleContextValue | null>(null);
 
-const NamesContext = createContext<NamesContextValue | null>(null);
-
-export function useNames(): NamesContextValue {
-  const ctx = useContext(NamesContext);
-  if (!ctx) throw new Error("useNames debe usarse dentro de <Providers>");
+export function usePeople(): PeopleContextValue {
+  const ctx = useContext(PeopleContext);
+  if (!ctx) throw new Error("usePeople debe usarse dentro de <Providers>");
   return ctx;
 }
 
@@ -57,24 +60,32 @@ let toastId = 0;
 
 export function Providers({
   children,
-  initialNames,
+  initialPeople,
 }: {
   children: React.ReactNode;
-  initialNames: Names;
+  initialPeople: Person[];
 }) {
-  const [names, setNames] = useState<Names>(initialNames);
+  const [people, setPeople] = useState<Person[]>(initialPeople);
   const [toasts, setToasts] = useState<Toast[]>([]);
 
-  const refreshNames = useCallback(async () => {
+  const refreshPeople = useCallback(async () => {
     try {
       const res = await api.get<SettingsResponse>("/api/settings");
-      setNames({ tony: res.settings.name_tony, sol: res.settings.name_sol });
+      if (res.settings.people?.length) setPeople(res.settings.people);
     } catch {
-      // Silencioso: mantenemos los nombres que ya teníamos.
+      // Silencioso: mantenemos la lista que ya teníamos.
     }
   }, []);
 
-  const nameOf = useCallback((p: Person) => (p === "tony" ? names.tony : names.sol), [names]);
+  const nameOf = useCallback((id: PersonId | "") => personName(people, id), [people]);
+
+  const colorFor = useCallback(
+    (id: PersonId | "") => {
+      const found = people.find((p) => p.id === id);
+      return found ? colorOf(found.color) : DEFAULT_COLOR;
+    },
+    [people]
+  );
 
   const toast = useCallback((message: string, type: ToastType = "info") => {
     const id = ++toastId;
@@ -84,21 +95,24 @@ export function Providers({
     }, 3500);
   }, []);
 
-  const namesValue = useMemo(() => ({ names, refreshNames, nameOf }), [names, refreshNames, nameOf]);
+  const peopleValue = useMemo(
+    () => ({ people, active: activePeople(people), refreshPeople, nameOf, colorFor }),
+    [people, refreshPeople, nameOf, colorFor]
+  );
   const toastValue = useMemo(() => ({ toast }), [toast]);
 
   // Refrescamos por si cambiaron en otra pestaña.
   useEffect(() => {
-    void refreshNames();
-  }, [refreshNames]);
+    void refreshPeople();
+  }, [refreshPeople]);
 
   return (
-    <NamesContext.Provider value={namesValue}>
+    <PeopleContext.Provider value={peopleValue}>
       <ToastContext.Provider value={toastValue}>
         {children}
         <ToastViewport toasts={toasts} />
       </ToastContext.Provider>
-    </NamesContext.Provider>
+    </PeopleContext.Provider>
   );
 }
 

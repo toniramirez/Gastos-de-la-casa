@@ -1,4 +1,4 @@
-import { computeSummary, settlementDirection } from "@/lib/balance";
+import { computeSummary } from "@/lib/balance";
 import { handleError, ok, readJson } from "@/lib/api";
 import { requireStore } from "@/lib/session";
 import { closePeriodSchema } from "@/lib/validation";
@@ -10,7 +10,8 @@ export const dynamic = "force-dynamic";
  * Cierra el período abierto:
  *  - calcula el balance de GASTOS del período desde los datos reales (no confía
  *    en el cliente),
- *  - guarda un Settlement si hay deuda por gastos,
+ *  - guarda un Settlement por cada pago que haga falta para saldar (con más de
+ *    dos personas pueden ser varios),
  *  - marca el período como cerrado y crea uno nuevo abierto.
  *
  * Los préstamos NO se saldan acá: la deuda de préstamos se arrastra al período
@@ -22,20 +23,17 @@ export async function POST(req: Request) {
     const body = await readJson(req);
     const { notes, next_period_name } = closePeriodSchema.parse(body);
 
-    const period = await store.getOpenPeriod();
+    const [settings, period] = await Promise.all([store.getSettings(), store.getOpenPeriod()]);
     // Gastos del período (lo que se salda) + todos los préstamos (deuda que se
-    // arrastra, solo para mostrarla en el resumen; no entra en el settlement).
+    // arrastra, solo para mostrarla en el resumen; no entra en los pagos).
     const [expenses, loans] = await Promise.all([
       store.listExpenses({ periodId: period.id }),
       store.listLoans(),
     ]);
-    const summary = computeSummary(period, expenses, loans);
-    const direction = settlementDirection(summary.gastosBalance);
+    const summary = computeSummary(period, expenses, loans, settings.people);
 
     const result = await store.closePeriod({
-      from: direction?.from ?? null,
-      to: direction?.to ?? null,
-      amount: direction?.amount ?? 0,
+      transfers: summary.gastosBalance.transfers,
       notes: notes ?? "",
       nextPeriodName: next_period_name,
     });
@@ -43,7 +41,7 @@ export async function POST(req: Request) {
     return ok({
       closedPeriod: result.closedPeriod,
       newPeriod: result.newPeriod,
-      settlement: result.settlement,
+      settlements: result.settlements,
       summary,
     });
   } catch (err) {

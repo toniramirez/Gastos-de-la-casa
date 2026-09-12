@@ -1,4 +1,4 @@
-import { computeSummary, settlementDirection } from "@/lib/balance";
+import { computeSummary } from "@/lib/balance";
 import { handleError, ok } from "@/lib/api";
 import { isUsingMemoryStore } from "@/lib/store";
 import { requireStore } from "@/lib/session";
@@ -16,10 +16,14 @@ export async function GET() {
       store.listExpenses({ periodId: period.id }),
       store.listLoans(),
     ]);
-    const summary = computeSummary(period, expenses, loans);
-    // El settlement del período es solo por gastos; los préstamos van aparte.
-    const settlement = settlementDirection(summary.gastosBalance);
-    return ok({ settings, summary, settlement, usingMemory: isUsingMemoryStore() });
+    const summary = computeSummary(period, expenses, loans, settings.people);
+    // Los pagos del período son solo por gastos; los préstamos van aparte.
+    return ok({
+      settings,
+      summary,
+      transfers: summary.gastosBalance.transfers,
+      usingMemory: isUsingMemoryStore(),
+    });
   } catch (err) {
     return handleError(err);
   }

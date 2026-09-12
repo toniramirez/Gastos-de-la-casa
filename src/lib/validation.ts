@@ -3,11 +3,20 @@
 // ==========================================================================
 
 import { z } from "zod";
-import { CATEGORIES } from "./types";
+import { CATEGORIES, parseSplitType } from "./types";
 
-export const personSchema = z.enum(["tony", "sol"]);
+/** Máximo de personas por cuenta. Es un tope de sentido común: la UI (y la
+ *  paleta de colores) están pensadas para una casa, no para un consorcio. */
+export const MAX_PEOPLE = 10;
 
-export const splitTypeSchema = z.enum(["50_50", "100_tony", "100_sol", "percent", "custom"]);
+/** Id de persona. No validamos contra la lista acá (eso necesita leer la
+ *  configuración); lo hace el store al construir el gasto o el préstamo. */
+export const personSchema = z.string().trim().min(1, "Falta la persona");
+
+/** Acepta los tipos nuevos y los viejos ("50_50", "100_tony", "100_sol"). */
+export const splitTypeSchema = z
+  .enum(["equal", "single", "percent", "custom", "50_50", "100_tony", "100_sol"])
+  .transform((v) => parseSplitType(v));
 
 const dateSchema = z
   .string()
@@ -17,6 +26,14 @@ const amountSchema = z
   .number({ invalid_type_error: "El monto debe ser un número" })
   .finite()
   .nonnegative("El monto no puede ser negativo");
+
+/** Mapa persona -> número (partes o porcentajes). */
+const perPersonNumbers = z.record(z.string(), z.number().finite().min(0));
+
+function sumValues(map: Record<string, number> | undefined): number {
+  if (!map) return 0;
+  return Object.values(map).reduce((a, b) => a + b, 0);
+}
 
 export const expenseInputSchema = z
   .object({
@@ -28,25 +45,35 @@ export const expenseInputSchema = z
     total: amountSchema.refine((v) => v > 0, "El total debe ser mayor a 0"),
     paid_by: personSchema,
     split_type: splitTypeSchema,
-    // Solo para split_type = percent
-    percent_tony: z.number().min(0).max(100).optional(),
-    // Solo para split_type = custom
-    share_tony: z.number().min(0).optional(),
-    share_sol: z.number().min(0).optional(),
+    // Solo para split_type = single: quién se come todo el gasto.
+    single_person: personSchema.optional(),
+    // Solo para split_type = percent: porcentaje de cada persona.
+    percents: perPersonNumbers.optional(),
+    // Solo para split_type = custom: monto de cada persona.
+    shares: perPersonNumbers.optional(),
     notes: z.string().trim().max(500).default(""),
     source: z.enum(["manual", "ticket"]).default("manual"),
   })
   .superRefine((val, ctx) => {
-    if (val.split_type === "percent" && val.percent_tony === undefined) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["percent_tony"], message: "Falta el porcentaje de Tony" });
+    if (val.split_type === "single" && !val.single_person) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["single_person"],
+        message: "Elegí quién se hace cargo del gasto",
+      });
+    }
+    if (val.split_type === "percent" && sumValues(val.percents) <= 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["percents"],
+        message: "Faltan los porcentajes",
+      });
     }
     if (val.split_type === "custom") {
-      const st = val.share_tony ?? 0;
-      const ss = val.share_sol ?? 0;
-      if (Math.round(st + ss) !== Math.round(val.total)) {
+      if (Math.round(sumValues(val.shares)) !== Math.round(val.total)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          path: ["share_sol"],
+          path: ["shares"],
           message: "Las partes personalizadas deben sumar el total",
         });
       }
@@ -71,9 +98,24 @@ export const loanInputSchema = z
 
 export type LoanInput = z.infer<typeof loanInputSchema>;
 
+/** Una persona tal como llega del formulario de Configuración. Sin `id` = es
+ *  nueva y el server le genera uno. */
+export const personInputSchema = z.object({
+  id: z.string().trim().max(60).optional(),
+  name: z.string().trim().min(1, "El nombre no puede estar vacío").max(30, "El nombre es muy largo"),
+  color: z.string().trim().max(20).optional(),
+  active: z.boolean().optional(),
+});
+
 export const settingsInputSchema = z.object({
-  name_tony: z.string().trim().min(1, "El nombre no puede estar vacío").max(30),
-  name_sol: z.string().trim().min(1, "El nombre no puede estar vacío").max(30),
+  people: z
+    .array(personInputSchema)
+    .min(1, "Tiene que haber al menos una persona")
+    .max(MAX_PEOPLE, `No se pueden cargar más de ${MAX_PEOPLE} personas`)
+    .refine(
+      (people) => people.filter((p) => p.active !== false).length >= 2,
+      "Tienen que quedar al menos dos personas activas"
+    ),
 });
 
 export type SettingsInput = z.infer<typeof settingsInputSchema>;

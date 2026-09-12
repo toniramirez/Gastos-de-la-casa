@@ -20,6 +20,8 @@ export const SHEETS = {
     "total",
     "paid_by",
     "split_type",
+    // Legacy (cuando eran dos personas fijas): las mantenemos escritas por
+    // comodidad, pero la fuente de verdad es la columna "shares".
     "share_tony",
     "share_sol",
     "created_by",
@@ -29,6 +31,10 @@ export const SHEETS = {
     "created_at",
     "updated_at",
     "account_id",
+    // Parte de cada persona como JSON: {"tony":5000,"sol":5000}. Reemplaza a
+    // share_tony/share_sol (que se siguen llenando para leer la hoja de un
+    // vistazo). Va último porque las columnas nuevas van siempre al final.
+    "shares",
   ],
   Loans: [
     "id",

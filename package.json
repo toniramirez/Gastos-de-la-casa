@@ -2,7 +2,7 @@
   "name": "gastos-de-la-casa",
   "version": "1.0.0",
   "private": true,
-  "description": "App para gestionar los gastos compartidos de la casa entre dos personas (Tony y Sol).",
+  "description": "App para gestionar los gastos compartidos de la casa entre las personas que vivan en ella.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",

@@ -6,6 +6,7 @@
 
 import { nowISO, todayISO } from "../format";
 import { makeId } from "../ids";
+import { defaultPeople } from "../people";
 import type {
   Expense,
   Loan,
@@ -13,6 +14,7 @@ import type {
   Period,
   Settings,
   Settlement,
+  Transfer,
 } from "../types";
 import type { ExpenseInput, LoanInput } from "../validation";
 import { buildExpense, buildLoan } from "./build";
@@ -40,7 +42,7 @@ function dbFor(accountId: string): MemoryDB {
   const all = (g.__gastosMemoryDBs ??= {});
   if (!all[accountId]) {
     all[accountId] = {
-      settings: { name_tony: "Tony", name_sol: "Sol" },
+      settings: { people: defaultPeople("Tony", "Sol") },
       periods: [],
       expenses: [],
       loans: [],
@@ -113,9 +115,7 @@ export class MemoryStore implements Store {
   }
 
   async closePeriod(input: {
-    from: "tony" | "sol" | null;
-    to: "tony" | "sol" | null;
-    amount: number;
+    transfers: Transfer[];
     notes: string;
     nextPeriodName?: string;
   }): Promise<CloseResult> {
@@ -126,20 +126,20 @@ export class MemoryStore implements Store {
 
     d.periods[idx] = { ...d.periods[idx], status: "closed", end_date: today };
 
-    let settlement: Settlement | null = null;
-    if (input.from && input.to && input.amount > 0) {
-      settlement = {
+    // Un Settlement por pago: con tres o más personas puede haber varios.
+    const settlements: Settlement[] = input.transfers
+      .filter((t) => t.amount > 0)
+      .map((t) => ({
         id: makeId("set"),
         period_id: open.id,
         date: today,
-        from_person: input.from,
-        to_person: input.to,
-        amount: Math.round(input.amount),
+        from_person: t.from,
+        to_person: t.to,
+        amount: Math.round(t.amount),
         notes: input.notes,
         created_at: nowISO(),
-      };
-      d.settlements.push(settlement);
-    }
+      }));
+    d.settlements.push(...settlements);
 
     const newPeriod: Period = {
       id: makeId("per"),
@@ -151,7 +151,7 @@ export class MemoryStore implements Store {
     };
     d.periods.push(newPeriod);
 
-    return { closedPeriod: d.periods[idx], newPeriod, settlement };
+    return { closedPeriod: d.periods[idx], newPeriod, settlements };
   }
 
   async listExpenses(filters?: ExpenseFilters): Promise<Expense[]> {
@@ -165,7 +165,7 @@ export class MemoryStore implements Store {
   }
 
   async createExpense(input: ExpenseInput & { period_id: string }): Promise<Expense> {
-    const e = buildExpense(input);
+    const e = buildExpense(input, this.db().settings.people);
     this.db().expenses.push(e);
     return { ...e };
   }
@@ -174,7 +174,11 @@ export class MemoryStore implements Store {
     const d = this.db();
     const idx = d.expenses.findIndex((e) => e.id === id);
     if (idx === -1) return null;
-    const updated = buildExpense({ ...input, period_id: d.expenses[idx].period_id }, d.expenses[idx]);
+    const updated = buildExpense(
+      { ...input, period_id: d.expenses[idx].period_id },
+      d.settings.people,
+      d.expenses[idx]
+    );
     d.expenses[idx] = updated;
     return { ...updated };
   }
@@ -197,7 +201,7 @@ export class MemoryStore implements Store {
   }
 
   async createLoan(input: LoanInput & { period_id: string }): Promise<Loan> {
-    const l = buildLoan(input);
+    const l = buildLoan(input, this.db().settings.people);
     this.db().loans.push(l);
     return { ...l };
   }
@@ -206,7 +210,11 @@ export class MemoryStore implements Store {
     const d = this.db();
     const idx = d.loans.findIndex((l) => l.id === id);
     if (idx === -1) return null;
-    const updated = buildLoan({ ...input, period_id: d.loans[idx].period_id }, d.loans[idx]);
+    const updated = buildLoan(
+      { ...input, period_id: d.loans[idx].period_id },
+      d.settings.people,
+      d.loans[idx]
+    );
     d.loans[idx] = updated;
     return { ...updated };
   }

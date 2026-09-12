@@ -1,8 +1,10 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { Providers } from "@/components/Providers";
+import { defaultPeople } from "@/lib/people";
 import { getSession } from "@/lib/session";
 import { getStore } from "@/lib/store";
+import type { Person } from "@/lib/types";
 
 export const metadata: Metadata = {
   title: "Gastos de la casa",
@@ -18,23 +20,24 @@ export const viewport: Viewport = {
   userScalable: false,
 };
 
-async function readInitialNames(): Promise<{ tony: string; sol: string }> {
+/** Personas de la cuenta para el primer render (después el cliente refresca). */
+async function readInitialPeople(): Promise<Person[]> {
   try {
     const session = await getSession();
-    if (!session) return { tony: "Tony", sol: "Sol" };
+    if (!session) return defaultPeople();
     const settings = await getStore(session.accountId).getSettings();
-    return { tony: settings.name_tony, sol: settings.name_sol };
+    return settings.people;
   } catch {
-    return { tony: "Tony", sol: "Sol" };
+    return defaultPeople();
   }
 }
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const initialNames = await readInitialNames();
+  const initialPeople = await readInitialPeople();
   return (
     <html lang="es">
       <body>
-        <Providers initialNames={initialNames}>{children}</Providers>
+        <Providers initialPeople={initialPeople}>{children}</Providers>
       </body>
     </html>
   );

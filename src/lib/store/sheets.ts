@@ -5,20 +5,24 @@
 import { MAIN_ACCOUNT_ID } from "../auth";
 import { nowISO, todayISO } from "../format";
 import { makeId } from "../ids";
-import type {
-  Category,
-  Expense,
-  ExpenseGroup,
-  ExpenseSource,
-  Loan,
-  LoanType,
-  PendingTicket,
-  Period,
-  PeriodStatus,
-  Person,
-  Settings,
-  Settlement,
-  SplitType,
+import { parsePeople, serializePeople } from "../people";
+import {
+  parseSplitType,
+  type Category,
+  type Expense,
+  type ExpenseGroup,
+  type ExpenseSource,
+  type Loan,
+  type LoanType,
+  type PendingTicket,
+  type Period,
+  type PeriodStatus,
+  type Person,
+  type PersonId,
+  type Settings,
+  type Settlement,
+  type Shares,
+  type Transfer,
 } from "../types";
 import type { ExpenseInput, LoanInput } from "../validation";
 import { buildExpense, buildLoan } from "./build";
@@ -41,8 +45,44 @@ function num(v: string | undefined): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function person(v: string | undefined): Person {
-  return v === "sol" ? "sol" : "tony";
+function personId(v: string | undefined): PersonId {
+  return String(v ?? "").trim();
+}
+
+/** Partes de un gasto. La fuente de verdad es la columna "shares" (JSON); si
+ *  la fila es vieja (de cuando eran dos personas fijas) se arma con las
+ *  columnas share_tony / share_sol. Exportada para tests. */
+export function parseShares(r: Record<string, string>): Shares {
+  if (r.shares) {
+    try {
+      const parsed = JSON.parse(r.shares) as Record<string, unknown>;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const shares: Shares = {};
+        for (const [id, value] of Object.entries(parsed)) {
+          if (id) shares[id] = Math.round(Number(value) || 0);
+        }
+        return shares;
+      }
+    } catch {
+      // JSON roto: caemos a las columnas viejas.
+    }
+  }
+  if (r.share_tony || r.share_sol) {
+    return { tony: num(r.share_tony), sol: num(r.share_sol) };
+  }
+  return {};
+}
+
+/** Entidad -> fila. Guardamos las partes como JSON y además seguimos
+ *  llenando share_tony / share_sol cuando esas personas participan, así la
+ *  hoja se puede leer de un vistazo. Exportada para tests. */
+export function expenseToRow(e: Expense): Record<string, unknown> {
+  return {
+    ...e,
+    shares: JSON.stringify(e.shares ?? {}),
+    share_tony: e.shares?.tony ?? "",
+    share_sol: e.shares?.sol ?? "",
+  };
 }
 
 // --- Parsers de fila -> entidad --------------------------------------------
@@ -68,11 +108,10 @@ function rowToExpense(r: Record<string, string>): Expense {
     category: (r.category as Category) || "Otros",
     group: (r.group as ExpenseGroup) || "dia_a_dia",
     total: num(r.total),
-    paid_by: person(r.paid_by),
-    split_type: (r.split_type as SplitType) || "50_50",
-    share_tony: num(r.share_tony),
-    share_sol: num(r.share_sol),
-    created_by: (r.created_by as Person) || "",
+    paid_by: personId(r.paid_by),
+    split_type: parseSplitType(r.split_type),
+    shares: parseShares(r),
+    created_by: personId(r.created_by),
     source: (r.source as ExpenseSource) || "manual",
     notes: r.notes,
     ticket_image_url: r.ticket_image_url || "",
@@ -87,8 +126,8 @@ function rowToLoan(r: Record<string, string>): Loan {
     period_id: r.period_id,
     date: r.date,
     type: (r.type as LoanType) === "devolucion" ? "devolucion" : "prestamo",
-    from_person: person(r.from_person),
-    to_person: person(r.to_person),
+    from_person: personId(r.from_person),
+    to_person: personId(r.to_person),
     amount: num(r.amount),
     notes: r.notes,
     created_at: r.created_at,
@@ -111,8 +150,8 @@ function rowToSettlement(r: Record<string, string>): Settlement {
     id: r.id,
     period_id: r.period_id,
     date: r.date,
-    from_person: person(r.from_person),
-    to_person: person(r.to_person),
+    from_person: personId(r.from_person),
+    to_person: personId(r.to_person),
     amount: num(r.amount),
     notes: r.notes,
     created_at: r.created_at,
@@ -178,20 +217,29 @@ export class SheetsStore implements Store {
     const rows = await readTable("Settings");
     const map: Record<string, string> = {};
     for (const r of rows) map[r.key] = r.value;
+    // Si todavía no existe la clave "people", la lista se arma con los dos
+    // nombres viejos (name_tony / name_sol).
     return {
-      name_tony: map[this.settingsKey("name_tony")] || "Tony",
-      name_sol: map[this.settingsKey("name_sol")] || "Sol",
+      people: parsePeople(map[this.settingsKey("people")], {
+        tony: map[this.settingsKey("name_tony")],
+        sol: map[this.settingsKey("name_sol")],
+      }),
     };
   }
 
   async updateSettings(patch: Partial<Settings>): Promise<Settings> {
-    for (const [rawKey, value] of Object.entries(patch)) {
-      if (value == null) continue;
-      const key = this.settingsKey(rawKey);
+    if (patch.people) {
+      const key = this.settingsKey("people");
+      const value = serializePeople(patch.people);
       const existed = await updateRow("Settings", "key", key, { key, value });
       if (!existed) await appendRow("Settings", { key, value });
     }
     return this.getSettings();
+  }
+
+  /** Las personas de la cuenta (para validar y dividir los gastos). */
+  private async people(): Promise<Person[]> {
+    return (await this.getSettings()).people;
   }
 
   async listPeriods(): Promise<Period[]> {
@@ -217,9 +265,7 @@ export class SheetsStore implements Store {
   }
 
   async closePeriod(input: {
-    from: Person | null;
-    to: Person | null;
-    amount: number;
+    transfers: Transfer[];
     notes: string;
     nextPeriodName?: string;
   }): Promise<CloseResult> {
@@ -229,18 +275,20 @@ export class SheetsStore implements Store {
     const closedPeriod: Period = { ...open, status: "closed", end_date: today };
     await this.update("Periods", open.id, closedPeriod);
 
-    let settlement: Settlement | null = null;
-    if (input.from && input.to && input.amount > 0) {
-      settlement = {
+    // Un Settlement por pago: con tres o más personas puede haber varios.
+    const settlements: Settlement[] = input.transfers
+      .filter((t) => t.amount > 0)
+      .map((t) => ({
         id: makeId("set"),
         period_id: open.id,
         date: today,
-        from_person: input.from,
-        to_person: input.to,
-        amount: Math.round(input.amount),
+        from_person: t.from,
+        to_person: t.to,
+        amount: Math.round(t.amount),
         notes: input.notes,
         created_at: nowISO(),
-      };
+      }));
+    for (const settlement of settlements) {
       await this.append("Settlements", settlement);
     }
 
@@ -255,8 +303,9 @@ export class SheetsStore implements Store {
     };
     await this.append("Periods", newPeriod);
 
-    await this.audit("close_period", "period", open.id, `settlement=${settlement?.amount ?? 0}`);
-    return { closedPeriod, newPeriod, settlement };
+    const totalSaldado = settlements.reduce((acc, s) => acc + s.amount, 0);
+    await this.audit("close_period", "period", open.id, `settlements=${settlements.length} total=${totalSaldado}`);
+    return { closedPeriod, newPeriod, settlements };
   }
 
   async listExpenses(filters?: ExpenseFilters): Promise<Expense[]> {
@@ -274,8 +323,8 @@ export class SheetsStore implements Store {
   }
 
   async createExpense(input: ExpenseInput & { period_id: string }): Promise<Expense> {
-    const e = buildExpense(input);
-    await this.append("Expenses", e);
+    const e = buildExpense(input, await this.people());
+    await this.append("Expenses", expenseToRow(e));
     await this.audit("create", "expense", e.id, `${e.total}`);
     return e;
   }
@@ -283,8 +332,8 @@ export class SheetsStore implements Store {
   async updateExpense(id: string, input: ExpenseInput): Promise<Expense | null> {
     const existing = await this.getExpense(id);
     if (!existing) return null;
-    const updated = buildExpense({ ...input, period_id: existing.period_id }, existing);
-    const ok = await this.update("Expenses", id, updated);
+    const updated = buildExpense({ ...input, period_id: existing.period_id }, await this.people(), existing);
+    const ok = await this.update("Expenses", id, expenseToRow(updated));
     if (!ok) return null;
     await this.audit("update", "expense", id, `${updated.total}`);
     return updated;
@@ -312,7 +361,7 @@ export class SheetsStore implements Store {
   }
 
   async createLoan(input: LoanInput & { period_id: string }): Promise<Loan> {
-    const l = buildLoan(input);
+    const l = buildLoan(input, await this.people());
     await this.append("Loans", l);
     await this.audit("create", "loan", l.id, `${l.amount}`);
     return l;
@@ -321,7 +370,7 @@ export class SheetsStore implements Store {
   async updateLoan(id: string, input: LoanInput): Promise<Loan | null> {
     const existing = await this.getLoan(id);
     if (!existing) return null;
-    const updated = buildLoan({ ...input, period_id: existing.period_id }, existing);
+    const updated = buildLoan({ ...input, period_id: existing.period_id }, await this.people(), existing);
     const ok = await this.update("Loans", id, updated);
     if (!ok) return null;
     await this.audit("update", "loan", id, `${updated.amount}`);
